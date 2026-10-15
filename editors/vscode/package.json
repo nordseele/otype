@@ -1,0 +1,84 @@
+{
+  "name": "otype",
+  "displayName": "OType",
+  "description": "OType, scripting for the Octatrack: syntax, live checking, completion, hover, signature help.",
+  "version": "0.1.0",
+  "publisher": "nordseele",
+  "license": "GPL-3.0-only",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Snippets",
+    "Linters"
+  ],
+  "main": "./extension.js",
+  "activationEvents": [
+    "onLanguage:otype"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "otype",
+        "aliases": [
+          "OType"
+        ],
+        "extensions": [
+          ".OTY",
+          ".oty"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "otype",
+        "scopeName": "source.otype",
+        "path": "./syntaxes/otype.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "otype",
+        "path": "./snippets/otype.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "otype.checkFolder",
+        "title": "OType: Check folder"
+      },
+      {
+        "command": "otype.reloadRegistry",
+        "title": "OType: Reload registry"
+      }
+    ],
+    "configuration": {
+      "title": "OType",
+      "properties": {
+        "otype.pythonPath": {
+          "type": "string",
+          "default": "python3",
+          "description": "Python 3 interpreter used to run the checker."
+        },
+        "otype.checkerPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path of tools/otype.py to use instead of the checker bundled with the extension (empty = bundled copy)."
+        },
+        "otype.liveCheck": {
+          "type": "boolean",
+          "default": true,
+          "description": "Check the folder while typing (on open, on change, on save). When off, only on open and on save."
+        },
+        "otype.debounceMs": {
+          "type": "number",
+          "default": 300,
+          "minimum": 0,
+          "description": "Delay in milliseconds after the last keystroke before the checker runs."
+        }
+      }
+    }
+  }
+}

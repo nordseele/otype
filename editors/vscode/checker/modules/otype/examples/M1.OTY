@@ -1,0 +1,31 @@
+# M1: the three first scripts on the unit (card + slots + trig edits; see `dump --profile m1`).
+# `run --card` takes the SET folder: on the card AUDIO/ lives inside the Set, e.g. /Set general/AUDIO.
+# kit_lock is written for the author's card (AUDIO/DRUMS/ELKA holds the *hat* files).
+
+def kicks
+  menu "POOL" >> "KICKS"
+  confirm "fill free slots?"
+  dir "AUDIO" deep
+  ext wav
+  match "bd*" "kick*"
+  l 1 8:
+    a static.firstfree
+    if a: static.load a file.pick
+
+def kit_lock
+  menu "TRIGS" >> "KIT LOCK"
+  dir "AUDIO/DRUMS/ELKA"
+  match "*hat*"
+  slots.clr
+  l 1 4:
+    a static.firstfree
+    static.load a file.pick
+    slots.add a
+  steps has.trig:
+    each: smp.set i slots.rnd
+
+def four
+  menu "TRIGS" >> "FOUR"
+  tr.clr
+  l 1 16: if eq mod i 4 1: tr.add i
+  prob 30: tr.add 15

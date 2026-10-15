@@ -1,0 +1,9 @@
+def draft
+  tempo 120
+  tr.clr
+  l 1 16:
+    if eq mod i 4 1: b rnd 128
+    if er 7 16 i:
+      tr.add i
+      pl.set i fx1 1 b
+      pl.set i amp.vol ? eq mod i 4 1 127 rrand 50 100

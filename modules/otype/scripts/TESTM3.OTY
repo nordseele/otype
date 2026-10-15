@@ -1,0 +1,110 @@
+# TEST LOCKS AND PART — one function per family, to check on the unit by eye and ear: p-locks, trigless locks, the
+# trig word (micro timing, retrigs, conditions), the part (parameters, LFO, effects, scenes, init), tempo and track slot.
+# Each one acts on the CURRENT track and pattern with fixed values, so the result can be checked by eye and ear.
+# Use a throwaway project, a STATIC track with a short sample (a kick or a click) in its slot.
+# Two series in the TEST category: L1..L8 (locks), then P1..P9 (part).
+# Run L1..L8 in order: "L1 PREP" puts trigs on steps 1 5 9 13, the next ones write on those steps.
+
+def t_prep
+  menu "TEST" >> "L1 PREP"
+  confirm "CLEAR TRACK TRIGS?"
+  tr.clr
+  tr.add 1
+  tr.add 5
+  tr.add 9
+  tr.add 13
+
+def t_plock
+  menu "TEST" >> "L2 P-LOCKS"   # AMP VOL rises over the four trigs; step 3 has no trig: skipped
+  pl.set 1 amp.vol 20
+  pl.set 5 amp.vol 60
+  pl.set 9 amp.vol 100
+  pl.set 13 amp.vol 127
+  pl.set 3 amp.vol 127
+
+def t_trigless
+  menu "TEST" >> "L3 TRIGLESS"  # a trigless lock on step 3, AMP VOL 0 on it
+  tl.add 3
+  pl.set 3 amp.vol 0
+
+def t_plclear
+  menu "TEST" >> "L4 PL CLEAR"
+  confirm "CLEAR P-LOCKS?"
+  pl.clr
+
+def t_micro
+  menu "TEST" >> "L5 MICRO"     # step 5 late, step 13 early (the most the unit allows)
+  micro.set 5 23
+  micro.set 13 -23
+
+def t_ratch
+  menu "TEST" >> "L6 RETRIG"    # four retriggers on step 9
+  ratch.set 9 4
+
+def t_cond
+  menu "TEST" >> "L7 COND"      # step 13 every second loop, step 5 half of the time
+  cond.set 13 1:2
+  cond.set 5 50%
+
+def t_trig_reset
+  menu "TEST" >> "L8 TRIG RESET" # micro 0, single trigs, no condition on the four steps
+  steps has.trig:
+    each:
+      micro.set i 0
+      ratch.set i 1
+      cond.set i off
+
+def t_parset
+  menu "TEST" >> "P1 PART VOL"  # the part's AMP VOL (not a lock): the whole track gets quieter or louder
+  param vol 40 0 127
+  par.set amp.vol vol
+
+def t_lfo
+  menu "TEST" >> "P2 LFO"      # LFO 1 on AMP VOL, fast and deep: a clear tremolo
+  lfo.dest 1 amp.vol
+  par.set lfo.spd 1 100
+  par.set lfo.dep 1 127
+
+def t_fx
+  menu "TEST" >> "P3 FX"       # FX1 = first effect after NONE, FX2 = second effect after NONE
+  fx.type 1 1
+  fx.type 2 2
+
+def t_rnd
+  menu "TEST" >> "P4 RND PART" # random LFOs and random effects (never NONE)
+  l 6 11:
+    par.set i rrand 0 127
+  l 1 3:
+    lfo.dest i rrand 18 29
+    lfo.wave i rrand 0 6
+  fx.type 1 rrand 1 10
+  fx.type 2 rrand 1 14
+
+def t_scenes
+  menu "TEST" >> "P5 SCENES"   # scene 1 blank, scenes 2..16 random locks on the LFO and FX pages
+  scn.clr 1
+  l 2 16:
+    l 6 11:
+      scn.set j i rrand 0 127
+    l 18 29:
+      scn.set j i rrand 0 127
+
+def t_scnclr
+  menu "TEST" >> "P6 SCN CLEAR"
+  confirm "CLEAR SCENES?"
+  scn.clr
+
+def t_tempo
+  menu "TEST" >> "P7 TEMPO"
+  param bpm 100 30 300
+  tempo bpm
+
+def t_slot
+  menu "TEST" >> "P8 SLOT"     # the current track's machine plays slot n
+  param n 2 1 128
+  trk.slot n
+
+def t_init
+  menu "TEST" >> "P9 TRK INIT" # the sound back to default (FX1 filter, FX2 delay, parameters); trigs and locks stay
+  confirm "INIT TRACK SOUND?"
+  trk.init

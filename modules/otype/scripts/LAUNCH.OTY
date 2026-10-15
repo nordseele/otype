@@ -1,0 +1,18 @@
+# LAUNCH — four harmless one-gesture scripts: no parameter, no question,
+# each one undone by its partner. Use a throwaway project.
+
+def l_slow
+  menu "LAUNCH" >> "TEMPO 90"
+  tempo 90
+
+def l_fast
+  menu "LAUNCH" >> "TEMPO 140"
+  tempo 140
+
+def l_quiet
+  menu "LAUNCH" >> "VOL LOW"     # the current track's part AMP VOL
+  par.set amp.vol 30
+
+def l_loud
+  menu "LAUNCH" >> "VOL HIGH"
+  par.set amp.vol 110

@@ -1,0 +1,167 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "OType",
+  "scopeName": "source.otype",
+  "patterns": [
+    {
+      "include": "#comment"
+    },
+    {
+      "include": "#string"
+    },
+    {
+      "include": "#list"
+    },
+    {
+      "include": "#def-line"
+    },
+    {
+      "include": "#const-line"
+    },
+    {
+      "include": "#user-call"
+    },
+    {
+      "include": "#condition"
+    },
+    {
+      "include": "#number"
+    },
+    {
+      "include": "#declaration"
+    },
+    {
+      "include": "#control"
+    },
+    {
+      "include": "#context"
+    },
+    {
+      "include": "#variable"
+    },
+    {
+      "include": "#state"
+    },
+    {
+      "include": "#api"
+    },
+    {
+      "include": "#builtin"
+    },
+    {
+      "include": "#operator"
+    },
+    {
+      "include": "#name"
+    }
+  ],
+  "repository": {
+    "comment": {
+      "name": "comment.line.number-sign.otype",
+      "match": "#.*$"
+    },
+    "string": {
+      "name": "string.quoted.double.otype",
+      "begin": "\"",
+      "end": "\"|$"
+    },
+    "list": {
+      "name": "meta.list.otype",
+      "begin": "\\{",
+      "end": "\\}|$",
+      "patterns": [
+        {
+          "include": "#number"
+        }
+      ]
+    },
+    "def-line": {
+      "begin": "(?i)^(DEF)\\s+([A-Za-z][A-Za-z0-9_]*)",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.declaration.otype"
+        },
+        "2": {
+          "name": "entity.name.function.otype"
+        }
+      },
+      "end": "$",
+      "patterns": [
+        {
+          "include": "#comment"
+        },
+        {
+          "name": "keyword.operator.otype",
+          "match": "\\|"
+        },
+        {
+          "name": "variable.parameter.otype",
+          "match": "[A-Za-z][A-Za-z0-9_]*"
+        }
+      ]
+    },
+    "const-line": {
+      "match": "(?i)^(CONST)\\s+([A-Za-z][A-Za-z0-9_]*)",
+      "captures": {
+        "1": {
+          "name": "keyword.declaration.otype"
+        },
+        "2": {
+          "name": "entity.name.constant.otype"
+        }
+      }
+    },
+    "user-call": {
+      "match": "(?i)(?<![\\w.])([A-Za-z][A-Za-z0-9_]*)(?=\\s*\\|)",
+      "captures": {
+        "1": {
+          "name": "entity.name.function.call.otype"
+        }
+      }
+    },
+    "condition": {
+      "name": "constant.other.condition.otype",
+      "match": "(?i)(?<![\\w.])(?:\\d+%|[1-8]:[1-8]|!?(?:FILL|PRE|NEI|1ST))(?![\\w.])"
+    },
+    "number": {
+      "name": "constant.numeric.otype",
+      "match": "(?i)(?<![\\w.])-?(?:0x[0-9A-Fa-f]+|\\d+)(?![\\w.])"
+    },
+    "declaration": {
+      "name": "keyword.declaration.otype",
+      "match": "(?i)(?<![\\w.])(?:DEF|CONST|MENU|PAGE|ON|PARAM|CONFIRM|OTYPE|INPUT|SAMPLE)(?![\\w.])"
+    },
+    "control": {
+      "name": "keyword.control.otype",
+      "match": "(?i)(?<![\\w.])(?:IF|ELIF|ELSE|L|EACH|PROB|EVERY|SKIP|DEL|BREAK|STOP|RET)(?![\\w.])"
+    },
+    "context": {
+      "name": "keyword.other.context.otype",
+      "match": "(?i)(?<![\\w.])(?:TRK|STEPS|STEP|SEED|[A-Za-z]+\\.SEED)(?![\\w.])"
+    },
+    "variable": {
+      "name": "variable.language.otype",
+      "match": "(?i)(?<![\\w.])[ABCDXYZTIJ](?![\\w.])"
+    },
+    "state": {
+      "name": "variable.other.state.otype",
+      "match": "(?i)(?<![\\w.])(?:FLIP|O|DRUNK)(?![\\w.])"
+    },
+    "api": {
+      "name": "support.function.otype",
+      "match": "(?i)(?<![\\w.])[A-Za-z_]\\w*(?:\\.\\w+)+(?![\\w.])"
+    },
+    "builtin": {
+      "name": "support.function.builtin.otype",
+      "match": "(?i)(?<![\\w.])(?:ADD|SUB|MUL|DIV|MOD|MIN|MAX|ABS|NEG|NOT|LIM|WRAP|EQ|NE|LT|GT|LE|GE|AND|OR|XOR|EZ|NZ|RND|RRAND|TOSS|CHANCE|PICK|AT|LEN|OFF|ER|DIR|EXT|MATCH|MSG|TEMPO|RATCH|PB|LFO|AMP|FX1|FX2|NORM)(?![\\w.])"
+    },
+    "operator": {
+      "name": "keyword.operator.otype",
+      "match": ">>|==|!=|<=|>=|[|:?<>]|(?<![\\w.])[-+*/](?![\\w.])"
+    },
+    "name": {
+      "name": "variable.other.otype",
+      "match": "(?i)[A-Za-z_][A-Za-z0-9_]*"
+    }
+  }
+}

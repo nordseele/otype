@@ -1,0 +1,40 @@
+# Page functions: scripts for a page of encoders, when the firmware has one.  `page "LABEL"` lists a function on that page
+# (label 1..8 characters); its `param`s (at most 6) are the encoders A..F.  A page function takes no argument and
+# may not use the card, the Static slots (dir ext match file.* static.* slots.*).  The page runs it on the
+# current track again each time an encoder moves, on a pattern that has been put back as the hands left it.
+
+# A Euclidean pattern page as a script: two euclidean rhythms (pl1 pulses rotated by r1, pl2 pulses rotated by r2)
+# spread over the pattern, combined by op (0 OR, 1 XOR, 2 AND, 3 SUB = the first without the second), the result
+# rotated by tro; it only adds red trigs, on steps that have none (tr.add).
+# Differences with the page: the length is pat.len (a page could spread over the track's length), and a script
+# cannot hold the trigs it added as a separate layer: that is the page's job (snapshot, print, discard).
+def eucl
+  page "EUCL"
+  param pl1 4 0 64
+  param pl2 0 0 64
+  param op 0 0 3
+  param r1 0 -63 63
+  param r2 0 -63 63
+  param tro 0 -63 63
+  a pat.len                          # n, the length of the rhythm
+  each:
+    if not has.trig i:
+      b wrap sub i tro 1 a           # the step this one comes from before the final rotation tro
+      c er.r pl1 a r1 b              # er.r k n r s: rhythm of k pulses over n steps, rotated by r
+      d er.r pl2 a r2 b
+      if eq op 0:
+        if or c d: tr.add i
+      elif eq op 1:
+        if xor c d: tr.add i
+      elif eq op 2:
+        if and c d: tr.add i
+      else:
+        if and c not d: tr.add i
+
+# The simplest page: a density, in percent of the free steps (named pdens: dens is a name of BOOMBAP.OTY).
+def pdens
+  page "DENS"
+  param pct 25 0 100
+  each:
+    if not has.trig i:
+      prob pct: tr.add i

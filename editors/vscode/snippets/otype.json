@@ -1,0 +1,76 @@
+{
+  "Function with a menu entry": {
+    "prefix": "def",
+    "description": "def with its place in the popup",
+    "body": [
+      "def ${1:name}",
+      "  menu \"${2:LEVEL}\" >> \"${3:ACTION}\"",
+      "  ${0:tr.clr}"
+    ]
+  },
+  "Brick (function with arguments, no menu)": {
+    "prefix": "brick",
+    "description": "def name | args",
+    "body": [
+      "def ${1:name} | ${2:args}",
+      "  $0"
+    ]
+  },
+  "Page function (SCRIPT page)": {
+    "prefix": "page",
+    "description": "def with a page label and its params (encoders A..F)",
+    "body": [
+      "def ${1:name}",
+      "  page \"${2:LABEL}\"",
+      "  param ${3:amount} ${4:50} ${5:0} ${6:100}",
+      "  ${0:tl.fill amount}"
+    ]
+  },
+  "Loop": {
+    "prefix": "loop",
+    "description": "l first last:",
+    "body": "l ${1:1} ${2:16}: $0"
+  },
+  "If block": {
+    "prefix": "if",
+    "description": "if condition: block",
+    "body": [
+      "if ${1:cond}:",
+      "  $0"
+    ]
+  },
+  "If / else": {
+    "prefix": "ifelse",
+    "description": "if ... else ...",
+    "body": [
+      "if ${1:cond}:",
+      "  ${2:tr.add 1}",
+      "else:",
+      "  ${0:tr.del 1}"
+    ]
+  },
+  "Each step of a selection": {
+    "prefix": "each",
+    "description": "steps pred: each: ...",
+    "body": [
+      "steps ${1:has.trig}:",
+      "  each:",
+      "    $0"
+    ]
+  },
+  "Parameter": {
+    "prefix": "param",
+    "description": "param name default min max",
+    "body": "param ${1:name} ${2:50} ${3:0} ${4:100}"
+  },
+  "Constant": {
+    "prefix": "const",
+    "description": "const name value",
+    "body": "const ${1:name} ${2:\"AUDIO/\"}"
+  },
+  "Probability": {
+    "prefix": "prob",
+    "description": "prob p: statement",
+    "body": "prob ${1:50}: $0"
+  }
+}

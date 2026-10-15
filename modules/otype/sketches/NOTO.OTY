@@ -1,0 +1,23 @@
+# noto: a dry kick from any file starting with "bd", flat accents
+# on the quarter notes, random volume elsewhere, a sample-and-hold on the filter.
+
+def noto
+  menu "DRUMS" >> "NOTO"
+  param dens 60 0 100             # chance of each off-grid click
+  tempo 120
+  trk cur:
+    dir "AUDIO" deep              # every file of the card...
+    match "bd*"                   # ...whose name starts with bd
+    a static.firstfree
+    static.load a file.rnd
+    trk.slot a
+    tr.clr
+    l 1 16:
+      if eq mod i 4 1: tr.add i                # the grid: 1 5 9 13
+      elif er 5 16 i: prob dens: tr.add i     # euclidean clicks in between
+    l 1 16:
+      if eq mod i 4 1: b rrand 10 120         # sample: a new value every 4 steps
+      if has.trig i:                           # hold: every trig gets it
+        pl.set i fx1 1 b                       # fx1 1 = filter base (fx1 = filter)
+        if eq mod i 4 1: pl.set i amp.vol 127  # accents: full, fixed
+        else: pl.set i amp.vol rrand 50 100   # the rest: random

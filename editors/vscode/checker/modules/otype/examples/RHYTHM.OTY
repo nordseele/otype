@@ -1,0 +1,32 @@
+# Rhythm and state operators: er, dr.v, flip, o, drunk and the random streams.
+
+def ab_euclid
+  menu "DRUMS" >> "AB EUCL"
+  param hits 5 1 16
+  seed ? flip 7 0                 # one press variation 7, the next the reference
+  prob.seed 3
+  trk 1:
+    play_one | "AUDIO/DRUMS/KICKS"
+    tr.clr
+    l 1 16:
+      if er hits 16 i:            # A: the euclidean hits, louder on the beats
+        tr.add i
+        pl.set i amp.vol dr.v 1 i
+      elif er.r 3 8 2 i:          # B: a rotated rhythm in A's gaps, ghost notes
+        tr.add i
+        pl.set i amp.vol dr.v 2 i
+    prob 50: tr.add 16            # half the presses, a pickup on the last step (no lock)
+
+def walk
+  menu "DRUMS" >> "WALK"
+  o.min 1
+  o.max 16
+  o.wrap 1                        # 1..16, then 1 again: each press goes on where the last one stopped
+  drunk.min 40
+  drunk.max 120
+  if lt drunk 41: drunk 80        # first press: drunk starts at 0 (held at 40): start the walk mid-range
+  trk cur:
+    l 1 8:
+      a o                         # read o once: each read moves it
+      tr.add a
+      pl.set a amp.vol drunk

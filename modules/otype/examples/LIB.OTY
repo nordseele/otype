@@ -1,0 +1,15 @@
+def play_one | folder
+  dir folder
+  a static.firstfree
+  static.load a file.rnd
+  trk.slot a
+
+def lock_samples | folder n
+  dir folder
+  match "*"
+  slots.clr
+  l 1 n:
+    a static.firstfree
+    static.load a file.pick
+    slots.add a
+  each: smp.set i slots.rnd

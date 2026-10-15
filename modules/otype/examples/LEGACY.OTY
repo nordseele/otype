@@ -1,0 +1,142 @@
+# Pool, LFO, effect, scene and trig helpers as scripts: a base to edit. Options that change what a function touches are
+# params (scene targets, lock targets); FILL OVERWR is its own action, POOL > REFILL.
+
+# ---- POOL ------------------------------------------------------------------------------------------------------
+def pool_fill
+  menu "POOL" >> "FILL"
+  dir "AUDIO" deep
+  ext wav aif aiff aifc
+  l 1 128:                        # every free slot, a random file each, never the same file twice
+    if gt i file.len: break
+    a static.firstfree
+    if ez a: break
+    static.load a file.pick
+
+def pool_refill
+  menu "POOL" >> "REFILL"         # FILL OVERWR: every slot gets a new file
+  confirm "REFILL?"
+  dir "AUDIO" deep
+  ext wav aif aiff aifc
+  l 1 128:
+    static.clr i
+    if gt i file.len: break
+    a static.firstfree
+    if ez a: break
+    static.load a file.pick
+
+def pool_shuffle
+  menu "POOL" >> "SHUFFLE"        # Fisher-Yates over the leading run of used slots
+  l 1 128:
+    if static.free i: break
+    static.swap i rrand 1 i
+
+def pool_clear
+  menu "POOL" >> "CLEAR"
+  confirm "CLR POOL?"
+  l 1 128:
+    static.clr i
+
+# ---- LFO, FX: the current track ---------------------------------------------------------------------------------
+def rnd_lfo
+  menu "LFO" >> "RANDOM"
+  l 6 11:
+    par.set i rrand 0 127
+  l 1 3:
+    lfo.dest i rrand 18 29
+    lfo.wave i rrand 0 6
+
+def rnd_fx
+  menu "FX" >> "RANDOM"
+  fx.type 1 rrand 1 10
+  fx.type 2 rrand 1 14
+
+# ---- SCENES: the current track (the eight tracks cost 12000 units, past the 4096 of a menu press: run it per track) ----
+def scenes_gen
+  menu "SCENES" >> "GENERATE"
+  param sc_lfo_dest 1 0 1         # SC LFO DEST: first aim the three LFOs of the track at the FX pages
+  if sc_lfo_dest:
+    l 1 3: lfo.dest i add 18 rnd 12       # parameters 18..29: FX1 and FX2
+  scn.clr 1                       # scene 1 blank, 2..16 random locks on the LFO and FX pages
+  l 2 16:
+    l 6 11:
+      scn.set j i rrand 0 127
+    l 18 29:
+      scn.set j i rrand 0 127
+
+def scenes_clr
+  menu "SCENES" >> "CLEAR"
+  confirm "CLR SCNS?"
+  trk all: scn.clr
+
+# ---- TRIGS: the current track, all 64 steps ----------------------------------------------------------------------
+def pl_families | pbs lfs ams fxs   # random p-locks of the ticked PL families on the current steps (their trigs):
+  if mod pbs 2: pl.rnd pb 1       #   pbs = PITCH 1 + START 2 + LENGTH 4 + RATE 8 + RETRIG 16 (the PB page),
+  if mod div pbs 2 2: pl.rnd pb 2 #   lfs LFO, ams AMP, fxs 1 FX1 / 2 FX2 / 3 both
+  if mod div pbs 4 2: pl.rnd pb 3
+  if mod div pbs 8 2: pl.rnd pb 4
+  if mod div pbs 16 2:
+    pl.rnd pb 5
+    pl.rnd pb 6
+  if lfs: l 1 6: pl.rnd lfo i
+  if ams: l 1 6: pl.rnd amp i
+  if mod fxs 2: l 1 6: pl.rnd fx1 i
+  if ge fxs 2: l 1 6: pl.rnd fx2 i
+
+def rnd_plocks
+  menu "TRIGS" >> "RANDOM P"
+  param pl_pitch 0 0 1
+  param pl_start 0 0 1
+  param pl_length 0 0 1
+  param pl_rate 0 0 1
+  param pl_retrig 0 0 1
+  param pl_lfo 0 0 1
+  param pl_amp 0 0 1
+  param pl_fx 3 0 3               # PL FX1 + PL FX2: 0 none, 1 FX1, 2 FX2, 3 both (the old default)
+  steps 1 64:
+    pl_families | add add pl_pitch mul 2 pl_start add mul 4 pl_length add mul 8 pl_rate mul 16 pl_retrig pl_lfo pl_amp pl_fx
+
+def rnd_smplocks
+  menu "TRIGS" >> "RANDOM SMP"
+  if eq trk.type 0:       # STATIC: the slots loaded in the pool are the candidates
+    slots.clr
+    b 0
+    l 1 128:
+      if not static.free i:
+        slots.add i
+        b 1
+    if b:
+      steps 1 64:
+        steps has.trig:
+          each: smp.set i slots.rnd
+
+def clr_plocks
+  menu "TRIGS" >> "CLEAR P"
+  confirm "CLEAR P?"
+  steps 1 64: pl.clr
+
+def clr_smplocks
+  menu "TRIGS" >> "CLEAR SMP"
+  confirm "CLR SMP?"
+  steps 1 64: smp.clr
+
+const tl_pct 25                   # the old GEN TRIGLESS LOCKS ran at 25 %
+
+def trigless
+  menu "TRIGS" >> "TRIGLESS"
+  param pl_pitch 0 0 1
+  param pl_start 0 0 1
+  param pl_length 0 0 1
+  param pl_rate 0 0 1
+  param pl_retrig 0 0 1
+  param pl_lfo 0 0 1
+  param pl_amp 0 0 1
+  param pl_fx 3 0 3
+  steps is.empty:                 # the free steps of the pattern (no trig, no lock): tl_pct % of them get a
+    tl.fill tl_pct                # trigless lock, then the ticked families lock those new trigs only
+    pl_families | add add pl_pitch mul 2 pl_start add mul 4 pl_length add mul 8 pl_rate mul 16 pl_retrig pl_lfo pl_amp pl_fx
+
+# ---- TRACK: the current track ------------------------------------------------------------------------------------
+def init_track
+  menu "TRACK" >> "INIT"
+  confirm "INIT TRK?"
+  trk.init

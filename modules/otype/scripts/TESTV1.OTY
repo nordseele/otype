@@ -1,0 +1,150 @@
+# OType v1 MKI checks. Use a throwaway project; current audio track only.
+# Run stopped unless a check explicitly concerns the next pattern cycle.
+
+def v1_read
+  menu "TEST" >> "V1 READ"
+  x tempo
+  y trk.slot
+  z pat.cur
+  t bank.cur
+
+def v1_trigs
+  menu "TEST" >> "V1 TRIGS"
+  confirm "REPLACE TEST TRIGS?"
+  tr.clr
+  tl.add 2
+  tl.del 2
+  tt.add 3
+  tt.del 3
+  tt.add 3
+  os.add 4
+  os.del 4
+  os.add 4
+  os.arm
+  sw.add 1
+  sw.del 2
+  sw.flip 5
+  sl.add 6
+  sl.del 6
+  sl.flip 7
+  trk.swing 61
+  x trk.swing
+
+def v1_words
+  menu "TEST" >> "V1 TIMING"
+  tr.add 1
+  cond.set 1 19
+  micro.set 1 -7
+  ratch.set 1 4
+  x cond.get 1
+  y micro.get 1
+  z ratch.get 1
+  cond.del 1
+  t cond.get 1
+
+def v1_once
+  menu "TEST" >> "V1 FILL ONCE"
+  fill.once
+
+def v1_fill
+  menu "TEST" >> "V1 FILL OFF"
+  fill 0
+  x fill
+
+def v1_levels
+  menu "TEST" >> "V1 LEVELS"
+  trk.level 95
+  trk.cue 22
+  trk.mute 1
+  x trk.level
+  y trk.cue
+  z trk.mute
+
+def v1_unmute
+  menu "TEST" >> "V1 UNMUTE"
+  trk.mute 0
+
+def v1_lfo
+  menu "TEST" >> "V1 LFO"
+  lfo.wave 1 18
+  lfo.mult 2 6
+  lfo.trig 3 7
+  lfod.set 1 63
+  lfod.set 2 -64
+  lfod.interp 1 1
+  x lfo.wave 1
+  y lfo.mult 2
+  z lfo.trig 3
+  t lfod.get 2
+
+def v1_lfod
+  menu "TEST" >> "V1 LFOD RND"
+  l 1 16:
+    lfod.set i rrand -64 63
+  l 1 16:
+    lfod.set i sub 0 lfod.get i
+
+def v1_setup
+  menu "TEST" >> "V1 SETUP"
+  pb.setup 1 3
+  amp.setup 2 1
+  fx1.setup 1 1
+  fx2.setup 1 1
+  x pb.setup 1
+  y amp.setup 2
+  z fx1.setup 1
+  t fx2.setup 1
+
+def v1_scene
+  menu "TEST" >> "V1 SCENES"
+  scn.set 2 amp.vol 44
+  scn.copy 2 3
+  scn.del 2 amp.vol
+  x scn.get 3 amp.vol
+  y scn.get 2 amp.vol
+  scn.clr 3
+
+def v1_save
+  menu "TEST" >> "V1 PART SAVE"
+  part.save
+
+def v1_reload
+  menu "TEST" >> "V1 RELOAD"
+  part.reload
+  x part.cur
+  y trk.level
+  z trk.mute
+
+def v1_part
+  menu "TEST" >> "V1 PART GO"
+  param n 2 1 4
+  part.go n
+  x part.cur
+
+def v1_type
+  menu "TEST" >> "V1 MACHINE"
+  param n 1 0 4
+  trk.type n
+  x trk.type
+
+def v1_slot
+  menu "TEST" >> "V1 SLOT"
+  param n 1 1 128
+  trk.slot n
+  x trk.slot
+
+def v1_tempo
+  menu "TEST" >> "V1 TEMPO"
+  param bpm 137 30 300
+  tempo bpm
+  x tempo
+
+def v1_pattern
+  menu "TEST" >> "V1 PAT GO"
+  param n 2 1 16
+  pat.go n
+
+def v1_bank
+  menu "TEST" >> "V1 BANK GO"
+  param bank_n 2 1 16
+  pat.go 1 bank_n

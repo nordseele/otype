@@ -1,0 +1,40 @@
+otype 1
+
+const hatdir "AUDIO/DRUMS/HIHATS"
+
+def boombap
+  menu "DRUMS" >> "BOOM BAP"
+  param dens 40 0 100
+  kick  | 1 "AUDIO/DRUMS/KICKS"
+  snare | 2 "AUDIO/DRUMS/SNARES"
+  hats  | 3 hatdir dens
+
+def kick | track folder
+  trk track:
+    play_one | folder
+    tr.clr
+    tr.add 1
+    tr.add 11
+    prob 50: tr.add 8
+    prob 30: tr.add 16
+
+def snare | track folder
+  trk track:
+    play_one | folder
+    tr.clr
+    tr.add 5
+    tr.add 13
+    micro.set 13 4
+    prob 25: tr.add 16
+
+def hats | track folder dens
+  trk track:
+    play_one | folder
+    tr.clr
+    l 1 16: if mod i 2: tr.add i
+    prob dens: tr.add 12
+    steps has.trig:
+      lock_samples | folder 4
+      each:
+        pl.set i amp.vol rrand 70 127
+        micro.set i rrand -3 3

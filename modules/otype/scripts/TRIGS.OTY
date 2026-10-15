@@ -1,0 +1,67 @@
+# TRIGS — the current track, the current pattern. Steps are written one by one (tr.add / tr.del), so no
+# action here asks YES/NO except CLEAR. A removed trig loses its locks (stock rule).
+
+def euclid
+  menu "TRIGS" >> "EUCLID"
+  param hits 5 1 16
+  param length 16 2 16
+  param rot 0 0 15
+  steps all:
+    each:
+      if er.r hits length rot i: tr.add i
+      else: tr.del i
+
+def every_n
+  menu "TRIGS" >> "EVERY N"
+  param period 4 1 16
+  param offset 0 0 15
+  steps all:
+    each:
+      if eq mod sub sub i 1 offset period 0: tr.add i
+      else: tr.del i
+
+def random_trigs
+  menu "TRIGS" >> "RANDOM"
+  param dens 30 0 100
+  steps all:
+    each:
+      if chance dens: tr.add i
+      else: tr.del i
+
+def add_trigs
+  menu "TRIGS" >> "ADD SOME"
+  param dens 20 0 100
+  steps all:
+    each: if not has.trig i: prob dens: tr.add i
+
+def thin_trigs
+  menu "TRIGS" >> "THIN OUT"
+  param pct 30 0 100
+  steps has.trig:
+    each: prob pct: tr.del i
+
+def invert_trigs
+  menu "TRIGS" >> "INVERT"
+  steps all:
+    each: tr.flip i
+
+def fill_end
+  menu "TRIGS" >> "FILL END"      # trigs on the last steps that play only while FILL is held
+  param last 4 1 16
+  param dens 75 0 100
+  steps all:
+    each:
+      if gt i sub pat.len last:
+        if not has.trig i: prob dens:
+          tr.add i
+          cond.set i fill
+
+def humanize
+  menu "TRIGS" >> "HUMANIZE"
+  param amount 4 0 23             # micro steps (1/384), either side; trigs only (emulator, NOT YET ON THE MKI)
+  micro.rnd amount
+
+def clear_trigs
+  menu "TRIGS" >> "CLEAR"
+  confirm "CLEAR TRIGS?"
+  tr.clr

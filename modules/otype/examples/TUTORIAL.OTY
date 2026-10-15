@@ -1,0 +1,32 @@
+# --- 1. One gesture: a few random trigs on the current track
+def sprinkle
+  menu "TRIGS" >> "SPRINKLE"
+  l 1 16: prob 25: tr.add i
+
+# --- 2. Euclidean hats with accents, on track 3
+def euclid_hats
+  menu "DRUMS" >> "EUCLID HH"
+  param hits 5 1 16
+  trk 3:
+    tr.clr
+    l 1 16: if er hits 16 i: tr.add i
+    steps has.trig:
+      each: pl.set i amp.vol dr.v 0 i
+
+# --- 3. A/B: one press a variation, the next press the reference
+def ab_locks
+  menu "LOCKS" >> "A/B FX"
+  seed ? flip 7 0
+  steps has.trig:
+    pl.rnd fx1 1
+    cond.rnd 50% 99%
+
+# --- 4. Bricks: functions with arguments, called by name
+def two_euclids
+  menu "DRUMS" >> "2 EUCLIDS"
+  euclid_on | 1 5 0
+  euclid_on | 2 3 4
+
+def euclid_on | track hits rot
+  trk track:
+    l 1 16: if er.r hits 16 rot i: tr.add i

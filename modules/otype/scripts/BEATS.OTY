@@ -1,0 +1,39 @@
+# BEATS — a starting point on three tracks at once (trigs only, nothing else of the tracks is touched).
+# The tracks' existing trigs are replaced: YES/NO first.
+
+def beat
+  menu "BEATS" >> "BASIC BEAT"
+  confirm "REPLACE 3 TRACKS?"
+  param style option 0 "FOUR" "BREAK" "HALF" "EUCLID"
+  param kick 1 1 8
+  param snare 2 1 8
+  param hats 3 1 8
+  param busy 40 0 100             # extra hits
+  trk kick:
+    steps all:
+      each:
+        a mod sub i 1 16
+        if eq style 0: b eq mod a 4 0
+        elif eq style 1: b or eq a 0 or eq a 10 eq a 7
+        elif eq style 2: b eq a 0
+        else: b er 5 16 i
+        if b: tr.add i
+        elif chance div busy 4: tr.add i
+        else: tr.del i
+  trk snare:
+    steps all:
+      each:
+        a mod sub i 1 16
+        if eq style 2: b eq a 8
+        elif eq style 3: b er.r 3 8 2 i
+        else: b or eq a 4 eq a 12
+        if b: tr.add i
+        elif and eq a 15 chance busy: tr.add i
+        else: tr.del i
+  trk hats:
+    steps all:
+      each:
+        a mod sub i 1 16
+        if eq mod a 2 0: tr.add i
+        elif chance busy: tr.add i
+        else: tr.del i

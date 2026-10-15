@@ -1,0 +1,65 @@
+# POOL — the project's sample slots (STATIC). Free slots only unless the action says otherwise.
+# Every op here is wired on the unit (FILL, SHUFFLE and CLEAR confirmed on the MKI).
+
+def slots_fill
+  menu "POOL" >> "FILL"
+  param src folder "AUDIO"
+  param subdirs bool 1
+  ext wav aif aiff aifc
+  if subdirs: dir src deep
+  else: dir src
+  l 1 128:                        # every free slot, a random file each, never twice the same
+    if gt i file.len: break
+    a static.firstfree
+    if ez a: break
+    static.load a file.pick
+
+def slots_fill_kind
+  menu "POOL" >> "FILL KIND"
+  param src folder "AUDIO"
+  param kind option 0 "KICK" "SNARE" "HAT" "PERC" "LOOP"
+  param count 8 1 32
+  dir src deep
+  ext wav aif aiff aifc
+  if eq kind 0: match "*kick*" "bd*" "*bassdrum*"
+  elif eq kind 1: match "*snare*" "sd*" "*snr*" "*clap*"
+  elif eq kind 2: match "*hat*" "*hh*" "*cymb*" "*ride*"
+  elif eq kind 3: match "*perc*" "*tom*" "*conga*" "*rim*" "*shaker*"
+  else: match "*loop*" "*break*" "*bpm*"
+  l 1 count:
+    if gt i file.len: break         # fewer files than count: each file once
+    a static.firstfree
+    if ez a: break
+    static.load a file.pick
+
+def slots_refill
+  menu "POOL" >> "REFILL"         # every slot gets a new file
+  confirm "REPLACE ALL SLOTS?"
+  param src folder "AUDIO"
+  param subdirs bool 1
+  ext wav aif aiff aifc
+  if subdirs: dir src deep
+  else: dir src
+  l 1 128:
+    static.clr i
+  l 1 128:
+    if gt i file.len: break
+    a static.firstfree
+    if ez a: break
+    static.load a file.pick
+
+def slots_shuffle
+  menu "POOL" >> "SHUFFLE"        # Fisher-Yates over slots 1.. up to the first free one (what the fill leaves)
+  l 1 128:
+    if static.free i: break
+    static.swap i rrand 1 i
+
+def slots_shuf_all
+  menu "POOL" >> "SHUFFLE ALL"    # Fisher-Yates over the 128 slots: holes move too
+  l 2 128: static.swap i rrand 1 i
+
+def slots_clear
+  menu "POOL" >> "CLEAR"
+  confirm "CLEAR ALL SLOTS?"
+  l 1 128:
+    static.clr i

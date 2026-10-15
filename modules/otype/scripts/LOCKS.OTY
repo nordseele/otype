@@ -1,0 +1,39 @@
+# LOCKS — sample locks on the current track's trigs (the stock store, confirmed on the unit).
+
+def smp_random
+  menu "LOCKS" >> "RANDOM SMP"
+  param first 1 1 128
+  param last 8 1 128
+  smp.rnd first last
+
+def smp_walk
+  menu "LOCKS" >> "SMP WALK"      # slot first, first+1 ... on the trigs in order, then again
+  param first 1 1 128
+  param last 4 1 128
+  a first
+  steps has.trig:
+    each:
+      smp.set i a
+      a add a 1
+      if gt a max first last: a min first last
+
+def kit_from_dir
+  menu "LOCKS" >> "KIT LOCK"      # load a few files of a folder into free slots, lock them at random on the trigs
+  param src folder "AUDIO"
+  param files 4 1 8
+  dir src deep
+  ext wav aif aiff aifc
+  slots.clr
+  l 1 files:
+    if gt i file.len: break
+    a static.firstfree
+    if ez a: break
+    static.load a file.pick
+    slots.add a
+  steps has.trig:
+    each: smp.set i slots.rnd
+
+def smp_clear
+  menu "LOCKS" >> "CLEAR SMP"
+  confirm "CLEAR SMP LOCKS?"
+  smp.clr
