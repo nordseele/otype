@@ -1,19 +1,6 @@
-```text
-┌──────────────────────────────────────────────┐
-│ LIVE SCRIPTS                   DNB  > 174.0  │
-├──────────────────────────────────────────────┤
-│                                              │
-│       ███   █████  █   █  ████   █████       │
-│      █   █    █     █ █   █   █  █           │
-│      █   █    █      █    ████   ████        │
-│      █   █    █      █    █      █           │
-│       ███     █      █    █      █████       │
-│                                              │
-│    in clock 24:  play 1   ·   rec.arm 1      │
-└──────────────────────────────────────────────┘
-```
-
-Scripting for the Elektron Octatrack.
+<p align="center">
+  <img src="https://nordseele.github.io/otype-docs/og.png" alt="otype: simple yet powerful scripting for the Octatrack" width="600">
+</p>
 
 <p align="center">
   <a href="https://nordseele.github.io/otype-docs/"><b>Command reference</b></a> ·
