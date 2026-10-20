@@ -17,6 +17,71 @@ python3 tools/otype.py run four_floor MY.OTY --seed 1 --bank PATH/TO/bank01.work
 Conventions used here: a function acts on the **current track** and the **current pattern** unless it says
 `trk …`; steps are numbered from 1; `i` is the step (or loop index) being visited.
 
+## Contents
+
+**Basics**
+1. [The smallest script: four on the floor](#1-the-smallest-script-four-on-the-floor)
+2. [Parameters the player sets before running](#2-parameters-the-player-sets-before-running)
+3. [Typed parameters: yes/no, a choice, a folder](#3-typed-parameters-yesno-a-choice-a-folder)
+4. [Random, but the same every time: seeds](#4-random-but-the-same-every-time-seeds)
+5. [Several tracks in one press, with your own functions](#5-several-tracks-in-one-press-with-your-own-functions)
+6. [A page of six encoders](#6-a-page-of-six-encoders)
+
+**Trigs and locks**
+7. [Accents with velocity curves and p-locks](#7-accents-with-velocity-curves-and-p-locks)
+8. [Humanize: micro timing and gentle volume](#8-humanize-micro-timing-and-gentle-volume)
+9. [Trig conditions: a fill on the last bar](#9-trig-conditions-a-fill-on-the-last-bar)
+10. [One press a variation, the next press back: state between presses](#10-one-press-a-variation-the-next-press-back-state-between-presses)
+
+**Slots and samples**
+11. [Fill the Static slots from a folder the player picks](#11-fill-the-static-slots-from-a-folder-the-player-picks)
+12. [A kit from a folder, locked at random on the trigs](#12-a-kit-from-a-folder-locked-at-random-on-the-trigs)
+13. [A walk through samples: drunk](#13-a-walk-through-samples-drunk)
+
+**Live scripts**
+14. [Drum and bass on eight tracks](#14-drum-and-bass-on-eight-tracks)
+15. [A fill on the bar](#15-a-fill-on-the-bar)
+16. [A fill where the snare drops out](#16-a-fill-where-the-snare-drops-out)
+17. [Live sequencing module](#17-live-sequencing-module)
+
+**MIDI in**
+18. [Pads from a MIDI controller](#18-pads-from-a-midi-controller)
+19. [A filter and a density knob from two CCs](#19-a-filter-and-a-density-knob-from-two-ccs)
+20. [Mirror an external controller](#20-mirror-an-external-controller)
+
+**MIDI out**
+21. [A generative line for an external synth](#21-a-generative-line-for-an-external-synth)
+
+**Recorder**
+22. [Record a loop on the trigs](#22-record-a-loop-on-the-trigs)
+23. [One take, then the next script arms it again](#23-one-take-then-the-next-script-arms-it-again)
+24. [Resample the loop](#24-resample-the-loop)
+
+**Linked scripts**
+25. [An acid line, wired](#25-an-acid-line-wired)
+
+**Audio**
+26. [Save an audio take and load it into a Flex slot](#26-save-an-audio-take-and-load-it-into-a-flex-slot)
+27. [Build a sliced sample chain from a folder](#27-build-a-sliced-sample-chain-from-a-folder)
+28. [Batch normalize samples](#28-batch-normalize-samples)
+
+**Part, effects, scenes, patterns**
+29. [An effect and an LFO, set in the part](#29-an-effect-and-an-lfo-set-in-the-part)
+30. [Scenes to play with the crossfader](#30-scenes-to-play-with-the-crossfader)
+31. [Show where `pat.go` landed](#31-show-where-patgo-landed)
+32. [Copy a pattern from a script](#32-copy-a-pattern-from-a-script)
+
+**Bulk jobs**
+33. [Bulk jobs on the Static slots, scenes, LFOs and effects, as loops](#33-bulk-jobs-on-the-static-slots-scenes-lfos-and-effects-as-loops)
+
+**Integrating the engine (for firmware authors)**
+- [I1. Build and link at your addresses](#i1-build-and-link-at-your-addresses)
+- [I2. Write the entry point](#i2-write-the-entry-point)
+- [I3. Put the code in memory](#i3-put-the-code-in-memory)
+- [I4. Reserve the block](#i4-reserve-the-block)
+- [I5. Check it on the unit](#i5-check-it-on-the-unit)
+- [I6. Your own interface](#i6-your-own-interface)
+
 ---
 
 ## 1. The smallest script: four on the floor
@@ -82,21 +147,44 @@ def sprinkle_seeded
 Without `seed`, each press draws new numbers. With `seed n`, a press always gives the same result; the
 simulator and the unit agree on it, so `run --seed` shows exactly what the machine will do.
 
-## 5. One press a variation, the next press back: state between presses
+## 5. Several tracks in one press, with your own functions
 
 ```otype
-def ab_fx
-  menu "LOCKS" >> "A/B FX"
-  seed ? flip 7 0
-  steps has.trig:
-    pl.rnd fx1 1
+def beat
+  menu "DRUMS" >> "BEAT"
+  confirm "REPLACE T1-T3?"
+  hits_on | 1 4 0
+  hits_on | 2 2 4
+  hits_on | 3 7 0
+
+def hits_on | track hits rot
+  trk track:
+    tr.clr
+    l 1 16: if er.r hits 16 rot i: tr.add i
 ```
 
-`flip` alternates 0, 1, 0… on each read and keeps its value between presses (so do `o` and `drunk`).
-`? c x y` is `x` when `c` is not 0, else `y`: odd presses use seed 7, even presses seed 0.
-`steps has.trig:` restricts the next lines to the steps that hold a trig.
+`def name | args` declares a function that takes arguments; call it with `name | values`. A function
+without `menu` is not shown in the menu: it is a brick for the others. `trk t:` acts on track `t` for the
+rest of its block.
 
-## 6. Accents with velocity curves and p-locks
+## 6. A page of six encoders
+
+```otype
+def dens_page
+  page "DENS"
+  param pct 25 0 100
+  each:
+    if not has.trig i:
+      prob pct: tr.add i
+```
+
+`page "LABEL"` puts the function on a page of encoders instead of the menu (when your firmware has one: the
+engine itself only lists `menu` functions); its parameters (at most six) are
+the encoders A..F. The page reruns it each time an encoder moves, on the pattern as you left it, and keeps
+the result as a layer you print or discard. A page function takes no argument and does not touch the card,
+the Static slots.
+
+## 7. Accents with velocity curves and p-locks
 
 ```otype
 def accents
@@ -110,7 +198,7 @@ def accents
 (here `amp.vol`) on step `s`; a step without a trig is skipped and counted, never turned into a trig.
 Parameter names: `amp.vol`, `lfo.spd 1`…, or by page and position: `fx1 1` is the first FX1 parameter.
 
-## 7. Humanize: micro timing and gentle volume
+## 8. Humanize: micro timing and gentle volume
 
 ```otype
 def humanize
@@ -125,7 +213,7 @@ def humanize
 wrapping them in `steps has.trig: each:` would run them once per trig and cost sixteen times more (the
 checker refuses it: over 4096).
 
-## 8. Trig conditions: a fill on the last bar
+## 9. Trig conditions: a fill on the last bar
 
 ```otype
 def fill_end
@@ -139,7 +227,21 @@ def fill_end
 `cond.set s c` writes the trig condition: `fill`, `!fill`, `pre`, `nei`, `1st`, a ratio `a:b`, or a
 probability among the Octatrack's own (`25%`, `50%`…). `off` removes it.
 
-## 9. Fill the Static slots from a folder the player picks
+## 10. One press a variation, the next press back: state between presses
+
+```otype
+def ab_fx
+  menu "LOCKS" >> "A/B FX"
+  seed ? flip 7 0
+  steps has.trig:
+    pl.rnd fx1 1
+```
+
+`flip` alternates 0, 1, 0… on each read and keeps its value between presses (so do `o` and `drunk`).
+`? c x y` is `x` when `c` is not 0, else `y`: odd presses use seed 7, even presses seed 0.
+`steps has.trig:` restricts the next lines to the steps that hold a trig.
+
+## 11. Fill the Static slots from a folder the player picks
 
 ```otype
 def static_from
@@ -159,9 +261,9 @@ def static_from
 one twice (`file.pick`); it stops when the files or the free slots run out. `static.load n f` loads file `f`
 of the list into Static slot `n`; `static.firstfree` is the first free one (0 if none). Lists hold up to 4096 names.
 The Static list is the sample list of the project: the Flex list is separate. More ways to fill, clear and
-randomize the slots are in recipe 16.
+randomize the slots are in recipe 33.
 
-## 10. A kit from a folder, locked at random on the trigs
+## 12. A kit from a folder, locked at random on the trigs
 
 ```otype
 def kit_lock
@@ -184,27 +286,7 @@ def kit_lock
 `file.pick` never gives the same file twice in a row of picks; `slots.clr` / `slots.add` build a working
 set of slots, `slots.rnd` draws one of them. `break` leaves the loop (no free slot, or no file left).
 
-## 11. Several tracks in one press, with your own functions
-
-```otype
-def beat
-  menu "DRUMS" >> "BEAT"
-  confirm "REPLACE T1-T3?"
-  hits_on | 1 4 0
-  hits_on | 2 2 4
-  hits_on | 3 7 0
-
-def hits_on | track hits rot
-  trk track:
-    tr.clr
-    l 1 16: if er.r hits 16 rot i: tr.add i
-```
-
-`def name | args` declares a function that takes arguments; call it with `name | values`. A function
-without `menu` is not shown in the menu: it is a brick for the others. `trk t:` acts on track `t` for the
-rest of its block.
-
-## 12. A walk through samples: drunk
+## 13. A walk through samples: drunk
 
 ```otype
 def smp_walk
@@ -219,7 +301,383 @@ def smp_walk
 `drunk` moves by -1, 0 or +1 on each read, between `drunk.min` and `drunk.max`: neighbouring trigs get
 neighbouring sample slots.
 
-## 13. An effect and an LFO, set in the part
+## 14. Drum and bass on eight tracks
+
+A whole drum and bass tune, played live on the eight tracks from eight Static slots, never twice the same. It is
+the showcase of the 1.1 live scripts: `launch 384` waits for the bar, `in clock 24` runs every sixteenth, four
+`var`s keep the step, the bar and two filters from one sixteenth to the next.
+
+```otype
+def dnb
+  var ticks 0
+  var bars 0
+  var reese 64                           # the bass filter, a random walk
+  var rise 0                            # the break filter, opens over the breakdown
+  launch 384
+  in clock 24:                          # every sixteenth
+    ticks add ticks 1
+    a mod sub ticks 1 16                # step in the bar, 0..15
+    if eq a 0:
+      if eq bars 0: tempo 174
+      bars add bars 1
+      reese add reese sub rnd 25 12       # the bass filter drifts each bar
+      if lt reese 30: reese 30
+      if gt reese 120: reese 120
+      trk 7:
+        par.set fx1 2 reese
+    b mod sub bars 1 32                 # bar in the arrangement, 0..31
+    c and gt b 11 lt b 16               # bars 13..16: the breakdown
+    if c:
+      if eq a 0:
+        rise add mul sub b 12 30 10     # 10, 40, 70, 100: the break opens
+        trk 6:
+          par.set fx1 2 rise
+      if or eq a 0 eq a 8: play 6       # break alone, half time
+      if eq mod a 4 2:
+        prob 40: play 8                 # fx, scattered
+    else:
+      if eq a 0:
+        trk 6:
+          par.set fx1 2 127
+      if or eq a 0 eq a 10: play 1      # kick, the two-step
+      if eq a 7:
+        prob 20: play 1                 # a pushed kick, now and then
+      if or eq a 4 eq a 12: play 2      # snare
+      if or eq a 2 or eq a 9 eq a 14:
+        prob 35: play 3                 # ghosts
+      trk 4:
+        par.set amp.vol rrand 60 127    # hats, a new accent every sixteenth
+      prob 75: play 4
+      if eq mod a 4 2:
+        prob 50: play 5                 # ride on the off-beats
+      if and eq a 0 eq mod bars 4 1: play 6  # the break every four bars
+      if or eq a 6 eq a 14: play 7      # reese on the "and" of 2 and 4
+      if eq a 11:
+        prob 30: play 7                 # a bass pickup
+      if gt b 15:                       # the drop: fills on every fourth bar
+        if and eq mod bars 4 0 gt a 11:
+          play 3
+          prob 50: play 2
+        if eq a 15:
+          prob 25: play 8
+```
+
+- **Set it up once.** [`DNBFILL.OTY`](../modules/otype/examples/DNBFILL.OTY) (POOL >> DNB FILL) fills them from a folder. Slots 1..8 hold the kick, snare, ghost, hats, ride, break, a reese bass and an fx; tracks
+  1..8 are Static machines on slots 1..8, with the stock filter in FX1 and its BASE at 0. Start on an empty
+  pattern: the script plays its own hits, it does not touch the pattern's trigs.
+- **The arrangement, 32 bars.** `b` is the bar in the arrangement. Bars 1..12 are the groove; 13..16 a
+  breakdown where only the break plays, half time, its filter opening a step each bar; 17..32 the drop, with a
+  fill at the end of every fourth bar. Then it starts again.
+- **The groove.** `a` is the sixteenth in the bar: the two-step (kick on 0 and 10, snare on 4 and 12), a pushed
+  kick on 7 one time in five, random ghosts, hats with a new volume on every sixteenth, the ride on the
+  off-beats, the reese on the "and" of 2 and 4 with a pickup on 11.
+- **The filters.** `reese` is a random walk: each bar the reese's filter WIDTH moves by up to 12, between 30
+  and 120. `rise` opens the break over the breakdown; the drop puts it back wide open.
+- **The file** is [`modules/otype/examples/DNB.OTY`](../modules/otype/examples/DNB.OTY).
+
+## 15. A fill on the bar
+
+A live script that changes the pattern on the bar, hands-free: `launch 384` makes its first run land on the
+next bar, then `in clock 384` runs once per bar. Track 8 is the fill track: every fourth bar, four trigs
+appear at the end; on the other bars they are removed. The rest of the pattern keeps playing.
+
+```otype
+def bar_fill
+  var bars 0
+  launch 384
+  in clock 384:
+    bars add bars 1
+    trk 8:
+      if eq mod bars 4 0:
+        l 13 16: tr.add i
+      else:
+        l 13 16: tr.del i
+```
+
+`l 13 16:` writes steps 13..16. Use a track whose steps 13..16 are free, or a throwaway pattern: `tr.del`
+removes whatever was there. The same idea works on any track and any steps.
+
+## 16. A fill where the snare drops out
+
+`in trig 4 all:` wakes on every trig placed on track 4, even when it does not play: a condition that failed,
+or a muted track. `trig.hit` says which. When the snare is refused, a percussion fill takes its place on
+track 8.
+
+```otype
+def ghost
+  in trig 4 all:
+    if eq trig.hit 0: play 8
+```
+
+The wake is dated on track 4's tick, so the fill lands exactly where the snare would have. Put a fill sample
+in slot 8 and assign it to track 8; `play 8` plays it. To put the fill on the snare track itself, `play 4`.
+
+## 17. Live sequencing module
+
+```otype
+def pulse_m
+  in clock 24:
+    if eq seq.mute 1 0:
+      nx.smp rrand 1 4
+      nx.pl fx1 1 rrand 40 110
+      play 1
+```
+
+`in clock N:` registers a live sequencer module executed every N ticks (24 ticks = 1 quarter note). On each clock tick, the module can query sequencer status (`seq.run`, `seq.step t`, `seq.mute t`), prepare per-hit locks for the next hit with `nx.smp n` (Static sample slot 1..128) and `nx.pl p v` (parameter `p` in 0..29, clamped by the part's descriptor like `pl.set`), and schedule track playback with `play t` (which consumes and resets the `nx.*` locks). In v1, the first trigger right after PLAY may be delayed by up to one timer period (~10 ms); all subsequent triggers fall on the step grid. While a menu script is running or awaiting user input (`ask`, `confirm`), modules are silent; their deadlines are skipped and counted, and they resume on the grid afterwards.
+
+## 18. Pads from a MIDI controller
+
+A controller on MIDI channel 1 plays tracks 1..8 from notes 60..67, at the note's velocity: note 60 plays
+track 1, note 67 track 8.
+
+```otype
+def pad_play
+  in note 1:
+    a sub note.num 59
+    if and gt a 0 lt a 9:
+      trk a:
+        trk.level note.vel
+        play a
+```
+
+`in note 1:` wakes on each note; `a` is the track; `trk.level` makes the track as loud as the note.
+`note.vel` is the velocity of the note that woke the block; `midi.vel 1` keeps the same number after the
+block, and `midi.note 1` the note. Track level is 0..127, the same range as the velocity, so the number is
+used as it comes. Notes outside 60..67 are ignored: the `if` keeps `play` in range.
+
+## 19. A filter and a density knob from two CCs
+
+Two knobs on another box shape a live line: CC 74 on channel 1 sets FX1's first parameter (the filter cutoff on
+a default part), CC 71 sets how often the track plays.
+
+```otype
+def cc_shape
+  var dens 40
+  param cut 64 0 127 cc 1 74
+  in cc 1 71:
+    dens lim cc.val 0 100
+  in clock 24:
+    par.set fx1 1 cut
+    prob dens: play 1
+```
+
+`param … cc ch n` binds a parameter to a controller and the engine keeps it up to date; `in cc ch n:` reads a
+controller value in the script. The filter is written to the part (`par.set`), not locked on a step, so it
+affects the whole track; the density is a `var` set by the CC and read by `prob`. The parameter page shows
+the binding (`CUT 64 CC74`) but does not refresh when the CC moves: the value the script reads is current.
+On a part where FX1 is not a filter, `fx1 1` is still the first parameter of FX1.
+
+## 20. Mirror an external controller
+
+```otype
+def cc_cut
+  menu "LOCKS" >> "CC CUT"
+  pl.set 1 amp.vol midi.cc 1 74
+
+def n2trk
+  in note 1:
+    a sub midi.note 1 59
+    if and gt a 0 lt a 9: play a
+```
+
+`midi.cc ch n`, `midi.note ch` and `midi.vel ch` read what the last MIDI message received on a channel left
+behind, so a knob on another box can drive a p-lock: CC CUT locks the first trig's volume to the knob's current
+value. `n2trk` plays the track the last note names. `send.nrpn ch p v` is the output side: one NRPN as its
+four Control Changes, all four or none if the transmit buffer is short.
+
+## 21. A generative line for an external synth
+
+`in clock 24:` runs every sixteenth; each run sends a note to channel 5 with 60 % probability, walking up a
+twelve-note ladder, and a filter CC every two beats. The external synth makes the sound; the Octatrack is the
+sequencer.
+
+```otype
+def genline
+  var n 0
+  in clock 24:
+    n add n 1
+    prob 60:
+      send.note 5 add 36 mod n 12 100 24
+    if eq mod n 8 0:
+      send.cc 5 74 mul mod n 16 8
+```
+
+`send.note ch n vel dur` schedules the note-off `dur` ticks later (24 = one sixteenth here). A note already
+playing on the same channel and note number is cut before the new one. `send.cc` and `send.prog` are the
+other two; `send.nrpn` sends a whole NRPN as its four CCs. Nothing is sent when the transmit buffer is full:
+the script never blocks.
+
+## 22. Record a loop on the trigs
+
+```otype
+def rec_bar
+  menu "REC" >> "LOOP 4"
+  rec.src 1 1 2
+  rec.len 1 4
+  rt.add 1
+```
+
+Places a recorder trig on step 1 of the track in context, listening to input A (INAB = 2 on track 1) for four
+steps (RLEN 4): at 120 BPM the recorder writes exactly 22 050 samples and stops. `rt.add s src` with the
+mask 1 (AB), 2 (CD), 4 (internal) and 7 for all three, as the stock trig does; `rt.del s` removes the recorder
+trig of a step (its sources, one-shot flag and micro-timing) and `rt.clr` removes them all. `rec.src t n v`
+and `rec.len t v` are the RECORDING SETUP values of a track, stored in the part like the page's own knobs.
+
+## 23. One take, then the next script arms it again
+
+```otype
+def one_take
+  ro.add 1
+  rec.trig 1 0
+  rec.loop 1 1
+```
+
+`ro.add s [src]` is a recorder trig with the one-shot state: it records once, and the next time the pattern
+reaches the step it stays silent, as a one-shot sample trig does. `rec.trig t v` picks ONE (0), ONE-2 (1) or
+HOLD (2) and `rec.loop t v` whether the take loops when played back. To take another one, re-arm with
+`os.arm` (all one-shot trigs of the track) — that is what [STOP]+[STOP] does for the whole pattern.
+`rec.arm t [src]` starts a recording without waiting for a trig: it is the panel's [TRACK]+[AUDIO REC], QREC
+included.
+
+## 24. Resample the loop
+
+The recording can start from a script, not from a key: `rec.arm t [src]` is [TRACK]+[AUDIO REC]. `rec.src`
+picks where the track's recorder listens, `rec.len` how much it takes. Here the bar is captured from MAIN
+every time track 1's first step plays; the second function arms on any note on channel 1.
+
+```otype
+def grab_bar
+  in trig 1 all:
+    if and eq trig.hit 1 eq trig.step 1:
+      rec.src 1 3 9
+      rec.len 1 16
+      rec.arm 1 4
+
+def grabnote
+  in note 1:
+    if gt note.vel 0:
+      rec.src 1 3 9
+      rec.len 1 16
+      rec.arm 1 4
+```
+
+- `rec.src 1 3 9`: source 3 of track 1 is SRC3, set to MAIN. `rec.len 1 16` is one bar of 16 steps;
+  `rec.arm 1 4` starts it from SRC3 only. The source mask adds 1 (AB), 2 (CD) and 4 (SRC3).
+- QREC still applies: with a quantisation set in RECORDING SETUP, the take starts on the next quantum, not on
+  the tick that armed it. The recorder runs for RLEN, so the buffer always holds the last bar captured; save
+  that take as a WAV with recipe 26 (`src.save`) and load the WAV into a Flex slot to play it back.
+- The take overwrites the track's recorder buffer: use a track whose recorder you are not using, and a
+  project you can reload.
+
+## 25. An acid line, wired
+
+Two live scripts, wired by name. `acid` runs every sixteenth, sends a gate on output 1 every quarter note and
+publishes a cutoff value on its output 1. `follow` wakes on that gate, reads the value with `cv acid 1` and
+sets FX1's cutoff on track 2 before it plays: a 303 line where the filter follows the master.
+
+```otype
+def acid
+  var n 0
+  in clock 24:
+    n add n 1
+    if eq mod n 4 1: gate 1
+    out 1 add 40 rnd 60
+
+def follow
+  in gate acid 1:
+    trk 2:
+      par.set fx1 1 add 40 cv acid 1
+      play 2
+```
+
+`cv acid 1` is 0 when `acid` is not running: the follower then plays with the base value, 40. The cascade
+is same-tick: `follow`'s `play 2` lands on the master's tick. `gate` and `out` only exist in live scripts; a
+name in `in gate` / `cv` is the function's name, up to 8 characters.
+
+## 26. Save an audio take and load it into a Flex slot
+
+```otype
+def bounce_take
+  menu "AUDIO" >> "BOUNCE"
+  input sample
+  src.save
+  flex.load 1 file.at 1
+  msg "SAVED TAKE"
+```
+
+`input sample` declares that the function operates on the active audio sample context (recording buffer or audio editor).
+`src.save` commits the take to durable storage on the card; upon return, `file.at 1` holds the newly written WAV file path.
+`flex.load 1 file.at 1` assigns the new recording to Flex slot 1.
+
+To keep every take, use the first free Flex slot:
+
+```otype
+def bounce_free
+  menu "AUDIO" >> "BOUNCE FREE"
+  input sample
+  src.save
+  a flex.firstfree
+  if nz a:
+    flex.load a file.at 1
+    msg "SLOT" a
+```
+
+Clearing all Flex slots is the same loop as for Static:
+
+```otype
+def flex_clear
+  menu "AUDIO" >> "FLEX CLEAR"
+  confirm "CLEAR ALL FLEX SLOTS?"
+  l 1 128:
+    flex.del i
+```
+
+`flex.firstfree` is the number of the first free Flex slot (0 if all 128 are used), the Flex twin of `static.firstfree`.
+`flex.del n` empties Flex slot `n` and gives its memory back, the Flex twin of `static.clr`; an empty slot is left alone.
+Like `flex.load` over a used slot, it is refused with STOP FIRST while the sequencer plays.
+The eight recorder buffers are not Flex slots: `flex.firstfree` never counts them and `flex.del` cannot empty them
+(both experimental).
+
+## 27. Build a sliced sample chain from a folder
+
+```otype
+def chain_folder
+  menu "AUDIO" >> "CHAIN"
+  param src folder "AUDIO"
+  dir src
+  ext wav
+  cat.clr
+  l 1 16:
+    if gt i file.len: break
+    cat.add file.at i
+  if nz file.len:
+    cat.save "CHAIN"
+    flex.load 1 file.at 1
+```
+
+`cat.clr` clears the host's concatenation list (up to 64 files). `cat.add` appends files from the current directory list.
+`cat.save "NAME"` stitches the concatenated files into a single WAV with automatic `.ot` slice markers per source file,
+saved in the context directory or `/AUDIO`. Upon success, `file.at 1` points to the generated chain.
+(Experimental. A very large folder is slow to read on the unit itself, before the first file is processed: allow time.)
+
+## 28. Batch normalize samples
+
+```otype
+def norm_folder
+  menu "AUDIO" >> "NORM -3DB"
+  param src folder "AUDIO"
+  dir src
+  ext wav
+  l 1 16:
+    if gt i file.len: break
+    norm file.at i -3
+```
+
+`norm path db` scans all frames of a WAV file on the card and calculates the gain needed to reach the target peak
+level (-12..0 dB), updating the `.ot` metadata in place without destructive audio rewrites.
+(Experimental. A very large folder is slow to read on the unit itself, before the first file is processed: allow time.)
+
+## 29. An effect and an LFO, set in the part
 
 ```otype
 def wobble
@@ -237,7 +695,7 @@ wherever no lock says otherwise, clamped to its range. A part holds much more th
 slots, every parameter page, the scenes); the recipe changes one effect and one LFO of the current track only.
 These changes survive a power cycle; RELOAD PART on the unit goes back to the saved part.
 
-## 14. Scenes to play with the crossfader
+## 30. Scenes to play with the crossfader
 
 ```otype
 def scenes_new
@@ -257,24 +715,41 @@ any other on B, and move the crossfader. `par.min p` and `par.max p` are the bou
 current track, so the draw stays inside what the parameter accepts; a parameter the part disables is refused
 (and counted) by all three operations.
 
-## 15. A page of six encoders
+## 31. Show where `pat.go` landed
+
+After a run the menu says `DONE`. `msg` replaces it with your own text, so you can see which pattern or bank a
+script chose:
 
 ```otype
-def dens_page
-  page "DENS"
-  param pct 25 0 100
-  each:
-    if not has.trig i:
-      prob pct: tr.add i
+def go_rnd_pat
+  menu "BASICS" >> "RND PATTERN"
+  a add rnd 16 1
+  b bank.cur
+  pat.go a b
+  msg "BANK" b "PAT" a
 ```
 
-`page "LABEL"` puts the function on a page of encoders instead of the menu (when your firmware has one: the
-engine itself only lists `menu` functions); its parameters (at most six) are
-the encoders A..F. The page reruns it each time an encoder moves, on the pattern as you left it, and keeps
-the result as a layer you print or discard. A page function takes no argument and does not touch the card,
-the Static slots.
+The end message reads `BANK 2 PAT 7` (a number, a space, the next item; the last `msg` of the run wins). **Show the
+variables you gave to `pat.go`, not `pat.cur` / `bank.cur` read afterwards:** when the sequencer is playing, the
+Octatrack queues a pattern change until the end of the current pattern (the stock call `pat.go` uses does that
+itself), so `pat.cur` right after `pat.go` can still say the old pattern, while the simulator already answers the
+target. The variables are right in both cases. A text is at most 29 characters in the worst case, a number counting
+as 6 (`-32768`): `msg "TEMPO" tempo` is fine, a long sentence is refused when the script loads.
 
-## 16. Bulk jobs on the Static slots, scenes, LFOs and effects, as loops
+## 32. Copy a pattern from a script
+
+```otype
+def keep_it
+  pat.copy 1 2
+```
+
+`pat.copy a b` is [FUNCTION]+[STOP] without the clipboard: pattern a lands on pattern b of the current bank,
+trigs, locks, length and the part assigned together, in the bank and in the pattern's SRAM copy. The stock's
+undo snapshot is taken first, so `UNDO PATTERN` can bring the old b back; a copy waiting in the pattern
+clipboard is left alone. It is a menu script: a live script is refused (`op pat.copy not allowed in a live
+script`), and the run stops if `a` is `b`.
+
+## 33. Bulk jobs on the Static slots, scenes, LFOs and effects, as loops
 
 OType has no one-shot helper for these: a few lines of loop do each, and you can change them. Each recipe
 below stands alone.
@@ -299,7 +774,7 @@ A file the unit refuses leaves its slot free, and the next file is offered to it
 
 ### Fill the Static slots at random
 
-Recipe 9: `file.pick` instead of `file.at i`.
+Recipe 11: `file.pick` instead of `file.at i`.
 
 ### Shuffle the Static slots
 
@@ -340,7 +815,7 @@ def static_clear
 
 ### Random scenes
 
-Recipe 14.
+Recipe 30.
 
 ### Random LFOs
 
@@ -392,184 +867,6 @@ def lfod_invert
 ```
 
 `lfod.set` clamps to -64..63, so an inverted -64 becomes 63.
-
----
-
-## 17. Show where `pat.go` landed
-
-After a run the menu says `DONE`. `msg` replaces it with your own text, so you can see which pattern or bank a
-script chose:
-
-```otype
-def go_rnd_pat
-  menu "BASICS" >> "RND PATTERN"
-  a add rnd 16 1
-  b bank.cur
-  pat.go a b
-  msg "BANK" b "PAT" a
-```
-
-The end message reads `BANK 2 PAT 7` (a number, a space, the next item; the last `msg` of the run wins). **Show the
-variables you gave to `pat.go`, not `pat.cur` / `bank.cur` read afterwards:** when the sequencer is playing, the
-Octatrack queues a pattern change until the end of the current pattern (the stock call `pat.go` uses does that
-itself), so `pat.cur` right after `pat.go` can still say the old pattern, while the simulator already answers the
-target. The variables are right in both cases. A text is at most 29 characters in the worst case, a number counting
-as 6 (`-32768`): `msg "TEMPO" tempo` is fine, a long sentence is refused when the script loads.
-
-## 18. Save an audio take and load it into a Flex slot
-
-```otype
-def bounce_take
-  menu "AUDIO" >> "BOUNCE"
-  input sample
-  src.save
-  flex.load 1 file.at 1
-  msg "SAVED TAKE"
-```
-
-`input sample` declares that the function operates on the active audio sample context (recording buffer or audio editor).
-`src.save` commits the take to durable storage on the card; upon return, `file.at 1` holds the newly written WAV file path.
-`flex.load 1 file.at 1` assigns the new recording to Flex slot 1.
-
-To keep every take, use the first free Flex slot:
-
-```otype
-def bounce_free
-  menu "AUDIO" >> "BOUNCE FREE"
-  input sample
-  src.save
-  a flex.firstfree
-  if nz a:
-    flex.load a file.at 1
-    msg "SLOT" a
-```
-
-Clearing all Flex slots is the same loop as for Static:
-
-```otype
-def flex_clear
-  menu "AUDIO" >> "FLEX CLEAR"
-  confirm "CLEAR ALL FLEX SLOTS?"
-  l 1 128:
-    flex.del i
-```
-
-`flex.firstfree` is the number of the first free Flex slot (0 if all 128 are used), the Flex twin of `static.firstfree`.
-`flex.del n` empties Flex slot `n` and gives its memory back, the Flex twin of `static.clr`; an empty slot is left alone.
-Like `flex.load` over a used slot, it is refused with STOP FIRST while the sequencer plays.
-The eight recorder buffers are not Flex slots: `flex.firstfree` never counts them and `flex.del` cannot empty them
-(both experimental).
-
-## 19. Build a sliced sample chain from a folder
-
-```otype
-def chain_folder
-  menu "AUDIO" >> "CHAIN"
-  param src folder "AUDIO"
-  dir src
-  ext wav
-  cat.clr
-  l 1 16:
-    if gt i file.len: break
-    cat.add file.at i
-  if nz file.len:
-    cat.save "CHAIN"
-    flex.load 1 file.at 1
-```
-
-`cat.clr` clears the host's concatenation list (up to 64 files). `cat.add` appends files from the current directory list.
-`cat.save "NAME"` stitches the concatenated files into a single WAV with automatic `.ot` slice markers per source file,
-saved in the context directory or `/AUDIO`. Upon success, `file.at 1` points to the generated chain.
-(Experimental. A very large folder is slow to read on the unit itself, before the first file is processed: allow time.)
-
-## 20. Batch normalize samples
-
-```otype
-def norm_folder
-  menu "AUDIO" >> "NORM -3DB"
-  param src folder "AUDIO"
-  dir src
-  ext wav
-  l 1 16:
-    if gt i file.len: break
-    norm file.at i -3
-```
-
-`norm path db` scans all frames of a WAV file on the card and calculates the gain needed to reach the target peak
-level (-12..0 dB), updating the `.ot` metadata in place without destructive audio rewrites.
-(Experimental. A very large folder is slow to read on the unit itself, before the first file is processed: allow time.)
-
-## 21. Live sequencing module
-
-```otype
-def pulse_m
-  in clock 24:
-    if eq seq.mute 1 0:
-      nx.smp rrand 1 4
-      nx.pl fx1 1 rrand 40 110
-      play 1
-```
-
-`in clock N:` registers a live sequencer module executed every N ticks (24 ticks = 1 quarter note). On each clock tick, the module can query sequencer status (`seq.run`, `seq.step t`, `seq.mute t`), prepare per-hit locks for the next hit with `nx.smp n` (Static sample slot 1..128) and `nx.pl p v` (parameter `p` in 0..29, clamped by the part's descriptor like `pl.set`), and schedule track playback with `play t` (which consumes and resets the `nx.*` locks). In v1, the first trigger right after PLAY may be delayed by up to one timer period (~10 ms); all subsequent triggers fall on the step grid. While a menu script is running or awaiting user input (`ask`, `confirm`), modules are silent; their deadlines are skipped and counted, and they resume on the grid afterwards.
-
-## 22. Record a loop on the trigs
-
-```otype
-def rec_bar
-  menu "REC" >> "LOOP 4"
-  rec.src 1 1 2
-  rec.len 1 4
-  rt.add 1
-```
-
-Places a recorder trig on step 1 of the track in context, listening to input A (INAB = 2 on track 1) for four
-steps (RLEN 4): at 120 BPM the recorder writes exactly 22 050 samples and stops. `rt.add s src` with the
-mask 1 (AB), 2 (CD), 4 (internal) and 7 for all three, as the stock trig does; `rt.del s` removes the recorder
-trig of a step (its sources, one-shot flag and micro-timing) and `rt.clr` removes them all. `rec.src t n v`
-and `rec.len t v` are the RECORDING SETUP values of a track, stored in the part like the page's own knobs.
-
-## 23. One take, then the next script arms it again
-
-```otype
-def one_take
-  ro.add 1
-  rec.trig 1 0
-  rec.loop 1 1
-```
-
-`ro.add s [src]` is a recorder trig with the one-shot state: it records once, and the next time the pattern
-reaches the step it stays silent, as a one-shot sample trig does. `rec.trig t v` picks ONE (0), ONE-2 (1) or
-HOLD (2) and `rec.loop t v` whether the take loops when played back. To take another one, re-arm with
-`os.arm` (all one-shot trigs of the track) — that is what [STOP]+[STOP] does for the whole pattern.
-`rec.arm t [src]` starts a recording without waiting for a trig: it is the panel's [TRACK]+[AUDIO REC], QREC
-included.
-
-## 24. Mirror an external controller
-
-```otype
-def cut
-  pl.set 1 10 midi.cc 1 74
-def n2trk
-  in note 1:
-    play sub midi.note 1 59
-```
-
-`midi.cc ch n`, `midi.note ch` and `midi.vel ch` read what the last MIDI message received on a channel left
-behind, so a knob on another box can drive a p-lock. `send.nrpn ch p v` is the output side: one NRPN as its
-four Control Changes, all four or none if the transmit buffer is short.
-
-## 25. Copy a pattern from a script
-
-```otype
-def keep_it
-  pat.copy 1 2
-```
-
-`pat.copy a b` is [FUNCTION]+[STOP] without the clipboard: pattern a lands on pattern b of the current bank,
-trigs, locks, length and the part assigned together, in the bank and in the pattern's SRAM copy. The stock's
-undo snapshot is taken first, so `UNDO PATTERN` can bring the old b back; a copy waiting in the pattern
-clipboard is left alone. It is a menu script: a live script is refused (`op pat.copy not allowed in a live
-script`), and the run stops if `a` is `b`.
 
 ## Limits worth knowing
 
@@ -634,7 +931,7 @@ in an emulator, boot, load a project, play and record, and compare.
 ### I5. Check it on the unit
 
 1. The unit behaves as stock until your interface calls the engine (menus, key combinations, projects).
-2. Put recipes 1 and 9 in `/SCRIPTS/` on the card. LOAD through your interface: `ot_nloaded` counts the
+2. Put recipes 1 and 11 in `/SCRIPTS/` on the card. LOAD through your interface: `ot_nloaded` counts the
    functions, and `/SCRIPTS/ERRORS.TXT` appears.
 3. Add a broken function to the file and LOAD again: only it is refused, `ERRORS.TXT` names its line.
 4. Run FOUR FLOOR, then power-cycle without saving: the trigs are still there, like a stock edit.
@@ -661,5 +958,5 @@ After `otype_prepare` succeeds, the parameters, the `confirm` text and the menu 
 
 To build a menu, read each function's category and name from `ot_ctx`, group by category and sort as you like;
 `input sample` is a flag of the function's entry (`docs/syntax.md`), so a recorder view can list only the
-functions that act on an audio take. Ask the
-parameters and the `confirm` YES/NO before the run, then show `DONE` or the run's `msg`.
+functions that act on an audio take. Ask the parameters and the `confirm` YES/NO before the run, then show
+`DONE` or the run's `msg`.

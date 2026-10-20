@@ -401,7 +401,7 @@ line and, last, `end box: "…"`.
   `MAX_MSG` is the ONE number to change when the end box grows (the checker, the C compiler, the C VM and the tests read
   it: `gen_ops_c.py` regenerates `OTC_L_MAX_MSG` / `OTC_MSG_MAX`).
 - **An argument of your own function** used in `msg` is a number, unless it is also used as a string (`dir`, `match`).
-- **What to show after `pat.go`.** See cookbook recipe 17: on the unit a pattern change while playing is queued, so
+- **What to show after `pat.go`.** See cookbook recipe 31: on the unit a pattern change while playing is queued, so
   `pat.cur` / `bank.cur` keep answering the pattern now playing until the switch; the simulator answers the target at once.
   Show the variable you passed to `pat.go`.
 
@@ -1185,7 +1185,7 @@ def walk
 
 ```
 walk  (modules/otype/examples/RHYTHM.OTY:20)  menu DRUMS > WALK  families EDIT  touches TRAC  cost 114  stack 3  scopes 3  ctl 2  locals a
-  hosts MENU  namespaces lang ctx tr pl prm state  code 83 bytes @1629  lines 13  counters 0
+  hosts MENU  namespaces lang ctx tr pl prm state  code 83 bytes @2587  lines 13  counters 0
 0000  10 01        push8 1                    ; 22  o.min 1
 0002  30 10 03     op o.min                   ;
 0005  10 10        push8 16                   ; 23  o.max 16
@@ -1220,11 +1220,11 @@ walk  (modules/otype/examples/RHYTHM.OTY:20)  menu DRUMS > WALK  families EDIT  
 0052  62           stop                       ;
 ```
 
-Its function entry (54 bytes, at `ftab_off` + 27 × 54 in the table of the seven example files):
+Its function entry (54 bytes, at `ftab_off` + 29 × 54 in the table of the nine example files):
 
 ```
 57 41 4c 4b 00 00 00 00 00 00 00 00 00 00 00 00   name "WALK"
-04 a4            menu list at pool offset 0x4a4 ("DRUMS" > "WALK")
+04 ca            menu list at pool offset 0x4ca ("DRUMS" > "WALK")
 00 01            hosts: MENU
 00 47            families: LANG CTX EDIT STATE (the dump hides the three every host allows)
 01               touches: TRAC
@@ -1233,9 +1233,9 @@ Its function entry (54 bytes, at `ftab_off` + 27 × 54 in the table of the seven
 00 01 04 2b      namespaces LANG CTX TR PL PRM STATE (bits 0 1 3 5 10 16)
 00 00 01 03      nargs 0, nparams 0, nlocals 1 (a), max_stack 3
 03 02 00 00      max_ctx 3, max_ctl 2, nctr 0, reserved
-04 3a  00 14     file name at pool offset 0x43a, def line 20
-06 5d  00 53     code at 0x65d of the code region, 83 bytes
-00 fe  02 e0     aux offset 0xfe, line table offset 0x2e0
+04 8e  00 14     file name at pool offset 0x48e, def line 20
+0a 1b  00 53     code at 0xa1b of the code region, 83 bytes
+01 1c  04 2c     aux offset 0x11c, line table offset 0x42c
 00 0d            13 line entries
 ```
 

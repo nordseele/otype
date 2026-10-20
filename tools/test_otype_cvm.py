@@ -297,13 +297,21 @@ def default_setups():
     return _DEFAULT_SETUP
 
 
-def py_run(prog, name, seed, state, track, length, start, mtypes, setup=None, params=None):
-    """The simulator's result JSON ("busy" added), or ("error", text).  A CARD BUSY run is its Result."""
+def py_run(prog, name, seed, state, track, length, start, mtypes, setup=None, params=None, vars=None):
+    """The simulator's result JSON ("busy" added), or ("error", text).  A CARD BUSY run is its Result.
+    `vars`: the `var` values of the previous press, as the C VM keeps them."""
     kw = setup.sim_kw() if setup is not None else {}
+    def _run_class(*a, **k):
+        run = spy_class(mtypes)(*a, **k)
+        if vars:
+            run.saved_vars = copy.deepcopy(vars)
+        return run
     try:
-        r = sim.result_json(sim.simulate(prog, name, seed=seed, state=state, track=track, length=length,
-                                         bank=start.path, pattern=start.pattern, run_class=spy_class(mtypes),
-                                         params=params, pmodel=copy.deepcopy(start.pmodel), **kw))
+        res = sim.simulate(prog, name, seed=seed, state=state, track=track, length=length,
+                           bank=start.path, pattern=start.pattern, run_class=_run_class,
+                           params=params, pmodel=copy.deepcopy(start.pmodel), **kw)
+        r = sim.result_json(res)
+        r["fn_vars"] = copy.deepcopy(res.fn_vars)      # `var` state, kept between presses like the C VM does
         r["busy"] = False
         return r
     except sim.CardBusy as e:
@@ -384,11 +392,12 @@ def param_list(prog, name, params):
     return [given.get(n, fparams[n][0]) for i, n in enumerate(fparams) if i <= last]
 
 
-def compare_press(tc, cv, prog, name, seed, state, track, length, start, mtypes, setup, press, what, stats, params=None):
+def compare_press(tc, cv, prog, name, seed, state, track, length, start, mtypes, setup, press, what, stats, params=None, vars=None):
     """One press on both engines.  Returns the simulator's result JSON, or None after an error run.
-    `params`: a `--param` dict, imposed on the Python VM and, through otc_vm_set_params, on the C VM."""
+    `params`: a `--param` dict, imposed on the Python VM and, through otc_vm_set_params, on the C VM.
+    `vars`: the `var` values of the previous press (the C VM keeps them between runs)."""
     pattern = hasattr(cv, "bind")      # an engine without the pattern binding (modules/otype/verify_vm.py)
-    r1 = py_run(prog, name, seed, state, track, length, start, mtypes, setup, params)
+    r1 = py_run(prog, name, seed, state, track, length, start, mtypes, setup, params, vars)
     if params is not None:
         cv.set_params(param_list(prog, name, params))
     if pattern:
@@ -453,16 +462,17 @@ def compare_function(tc, cv, prog, name, seeds, stats, variants=((1, 16),), star
         mtypes = var[2] if len(var) > 2 else {}
         for seed in seeds:
             cv.reset_state()
-            state = None
+            state = vars_ = None
             for press in range(PRESSES):
                 what = "%s [%s%s] seed %d press %d track %d len %d%s" % (
                     name, start.label, "; " + setup.label if setup else "", seed, press, track, length,
                     " types %r" % (mtypes,) if mtypes else "")
                 r1 = compare_press(tc, cv, prog, name, seed, state, track, length, start, mtypes, setup,
-                                   press, what + ("" if params is None else " params %r" % (params,)), stats, params)
+                                   press, what + ("" if params is None else " params %r" % (params,)), stats, params, vars_)
                 if r1 is None:
                     break
                 state = r1["state"]
+                vars_ = r1.get("fn_vars")
 
 
 # the machine types the pattern-using functions are also run with (a PICKUP host track, PICKUP among

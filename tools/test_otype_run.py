@@ -20,6 +20,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -3677,6 +3678,125 @@ class TestCoverage(Base):
     def test_the_coverage_list_only_names_real_ops(self):
         real = {o.name for o in O.ALL_OPS}
         self.assertEqual(sorted(COVERED - real), [])
+
+
+class TestV11Recipes(Base):
+    """The 1.1 recipes and the drum and bass showcase.  Every cookbook block is read from the page, so each
+    new recipe is checked and run here and the page and the test cannot drift apart."""
+
+    PATH = os.path.join(ROOT, "docs", "cookbook.md")
+    DNB = os.path.join(ROOT, "modules", "otype", "examples", "DNB.OTY")
+
+    def block(self, name):
+        with open(self.PATH) as f:
+            blocks = re.findall(r"```otype\n(.*?)```", f.read(), re.S)
+        for text in blocks:
+            if re.search(r"^def %s\b" % re.escape(name), text, re.M):
+                return text
+        self.fail("no cookbook block defines %s" % name)
+
+    def checked(self, name):
+        p = otype.check_sources([("C.OTY", self.block(name))])
+        self.assertEqual([str(d) for d in p.diags], [])
+        return p
+
+    def event(self, prog, name, ev, seed=1, **kw):
+        def _make(*args, **kwargs):
+            r = sim.Run(*args, **kwargs)
+            r.current_event = ev
+            r.tick = 0
+            return r
+        return sim.simulate(prog, name, seed=seed, run_class=_make, **kw)
+
+    @staticmethod
+    def trig(track, step, hit):
+        return {"type": "TRIG", "track": track, "trig.step": step, "trig.hit": hit,
+                "trig.val": 0, "trig.genre": 0}
+
+    def test_dnb_showcase(self):
+        with open(self.DNB) as f:
+            src = f.read()
+        self.assertEqual(self.block("dnb").strip(), src[src.index("def dnb"):].strip())   # the page copies the file
+        prog = otype.check_files([self.DNB])
+        self.assertEqual([str(d) for d in prog.diags], [])
+        res, plays = sim.simulate_module(prog, "dnb", total_ticks=32 * 384, seed=1)
+        self.assertLessEqual(res.max_cost, 512)          # the live budget
+        bar = lambda n: [(t - n * 384, k) for t, k in plays if n * 384 <= t < (n + 1) * 384]
+        for hit in [(0, 1), (96, 2), (240, 1), (288, 2)]:    # the two-step, 24 ticks a sixteenth
+            self.assertIn(hit, bar(0))
+        self.assertEqual(sorted({k for _, k in plays}), list(range(1, 9)))   # all eight tracks play
+        down = [k for n in range(12, 16) for _, k in bar(n)]
+        self.assertNotIn(1, down)                        # bars 13..16: the breakdown, no kick
+        self.assertIn(6, down)                           # the break alone
+        self.assertIn((13 * 24, 3), bar(19))             # the drop: a fill on the fourth bar
+        self.assertIn((0, 1), bar(16))                   # the kick is back
+
+    def test_a_fill_on_the_bar(self):
+        prog = self.checked("bar_fill")
+        res, _ = sim.simulate_module(prog, "bar_fill", total_ticks=4 * 384, seed=1)
+        t8 = res.model.tracks[8]
+        self.assertEqual([t8.has("trig", s) for s in range(1, 17)], [False] * 12 + [True] * 4)
+
+    def test_a_fill_where_the_snare_drops_out(self):
+        prog = self.checked("ghost")
+        self.assertEqual(self.event(prog, "ghost", self.trig(4, 11, 0)).plays, [(0, 8)])
+        self.assertEqual(self.event(prog, "ghost", self.trig(4, 11, 1)).plays, [])
+
+    def test_pads_from_a_midi_controller(self):
+        prog = self.checked("pad_play")
+        note = {"type": "NOTE", "note.num": 62, "note.vel": 99, "note.ch": 1, "ch": 1}
+        r = self.event(prog, "pad_play", note)
+        self.assertEqual(r.plays, [(0, 3)])
+        self.assertEqual(r.model.part[3].level, 99)              # the note's velocity is the track level
+        self.assertEqual(self.event(prog, "pad_play", dict(note, **{"note.num": 55})).plays, [])
+
+    def test_a_filter_and_a_density_knob_from_two_ccs(self):
+        prog = self.checked("cc_shape")
+        res, _ = sim.simulate_module(prog, "cc_shape", total_ticks=24, seed=1)
+        self.assertEqual(res.model.part[1].params, {18: 64})   # `par.set fx1 1 cut`, cut at its default
+
+    def test_a_generative_line_for_an_external_synth(self):
+        prog = self.checked("genline")
+        r = self.event(prog, "genline", {"type": "CLOCK"}, seed=3)   # seed 3: the first draw is below 60
+        self.assertEqual(r.midi_out, [(0, "note", 5, 37, 100, 24)])
+
+    def test_resample_the_loop(self):
+        prog = self.checked("grab_bar")
+        r = self.event(prog, "grab_bar", self.trig(1, 1, 1))
+        self.assertEqual(r.model.rec_arms, [(1, 4)])
+        setup = r.model.part[1].rec_setup
+        self.assertEqual((setup[4], setup[2]), (9, 15))          # SRC3 = MAIN, RLEN 16 steps (stored 0-based)
+        self.assertEqual(self.event(prog, "grab_bar", self.trig(1, 2, 1)).model.rec_arms, [])
+        r = self.event(prog, "grabnote", {"type": "NOTE", "note.num": 60, "note.vel": 100, "note.ch": 1, "ch": 1})
+        self.assertEqual(r.model.rec_arms, [(1, 4)])
+
+    def test_an_acid_line_wired(self):
+        prog = self.checked("acid")
+        r = self.event(prog, "acid", {"type": "CLOCK"})
+        self.assertEqual(r.gates, [(0, 1)])
+        self.assertTrue(40 <= r.outs[0] <= 99)
+
+        def _make(*args, **kwargs):
+            run = sim.Run(*args, **kwargs)
+            run.tick = 0
+            run.current_event = {"type": "GATE", "gate.name": "ACID", "gate.out": 1}
+            run.module_outs = {"ACID": [90, 0, 0, 0]}
+            return run
+        r2 = sim.simulate(prog, "follow", seed=1, run_class=_make)
+        self.assertEqual(r2.plays, [(0, 2)])
+        self.assertEqual(r2.model.part[2].params, {18: 127})     # 40 + 90, clamped to the cutoff range
+
+    def test_mirror_an_external_controller(self):
+        prog = self.checked("cc_cut")
+        bank = synthetic_bank(os.path.join(self.tmp(), "b.work"), pattern=1, length=16)
+        m = sim.Model()
+        m.midi_cc[(1, 74)] = 42
+        r = sim.simulate(prog, "cc_cut", seed=1, bank=bank, model=m)
+        self.assertEqual(self.locks(r)[1][15], 42)               # step 1's AMP VOL takes the CC value
+        m2 = sim.Model()
+        m2.midi_note[1] = 64
+        note = {"type": "NOTE", "note.num": 64, "note.vel": 100, "note.ch": 1, "ch": 1}
+        self.assertEqual(self.event(prog, "n2trk", note, model=m2).plays, [(0, 5)])
 
 
 class CookbookRecipes(unittest.TestCase):

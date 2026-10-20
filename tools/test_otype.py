@@ -86,12 +86,12 @@ class Examples(Base):
     def test_examples_pass(self):
         files = sorted(glob.glob(os.path.join(ROOT, "modules", "otype", "examples", "*.OTY")))
         self.assertEqual([os.path.basename(f) for f in files],
-                         ["BOOMBAP.OTY", "LEGACY.OTY", "LIB.OTY", "M1.OTY", "PAGE.OTY", "RHYTHM.OTY", "TUTORIAL.OTY"])
+                         ["BOOMBAP.OTY", "DNB.OTY", "DNBFILL.OTY", "LEGACY.OTY", "LIB.OTY", "M1.OTY", "PAGE.OTY", "RHYTHM.OTY", "TUTORIAL.OTY"])
         prog = otype.check_files(files)
         self.assertEqual(self.errs(prog), [])
         self.assertEqual(self.warns(prog), [])
         self.assertEqual(self.ok_names(prog), sorted(
-            ["BOOMBAP", "KICK", "SNARE", "HATS", "PLAY_ONE", "LOCK_SAMPLES",
+            ["BOOMBAP", "DNB", "DNB_FILL", "KICK", "SNARE", "HATS", "PLAY_ONE", "LOCK_SAMPLES",
              "AB_EUCLID", "WALK",
              "SPRINKLE", "EUCLID_HATS", "AB_LOCKS", "TWO_EUCLIDS", "EUCLID_ON",
              "KICKS", "KIT_LOCK", "FOUR", "EUCL", "PDENS",
@@ -174,7 +174,7 @@ class CaseInsensitive(Base):
         srcs = self.sources()
         base, prog = self.summary(srcs)
         self.assertEqual(self.errs(prog), [])
-        self.assertTrue(base["json"] and len(base["cost"]) == 33)     # 18 + LEGACY.OTY 15
+        self.assertTrue(base["json"] and len(base["cost"]) == 35)     # 18 + LEGACY.OTY 15 + DNB.OTY 1 + DNBFILL.OTY 1
         for mode in ("upper", "mixed"):
             alt = [(l, recase(t, mode)) for l, t in srcs]
             self.assertNotEqual(alt, srcs)

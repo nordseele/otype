@@ -1,6 +1,19 @@
-<p align="center">
-  <img src="https://nordseele.github.io/otype-docs/og.png" alt="otype: simple yet powerful scripting for the Octatrack" width="600">
-</p>
+```text
+┌──────────────────────────────────────────────┐
+│ LIVE SCRIPTS                   DNB  > 174.0  │
+├──────────────────────────────────────────────┤
+│                                              │
+│       ███   █████  █   █  ████   █████       │
+│      █   █    █     █ █   █   █  █           │
+│      █   █    █      █    ████   ████        │
+│      █   █    █      █    █      █           │
+│       ███     █      █    █      █████       │
+│                                              │
+│    in clock 24:  play 1   ·   rec.arm 1      │
+└──────────────────────────────────────────────┘
+```
+
+Scripting for the Elektron Octatrack.
 
 <p align="center">
   <a href="https://nordseele.github.io/otype-docs/"><b>Command reference</b></a> ·
@@ -25,6 +38,39 @@ def four_floor
 
 <sub>A whole script: a menu entry, a YES/NO, then a kick on every beat of the current track.</sub>
 
+A live script runs with the sequencer instead: a drum and bass on the eight tracks, eight Static slots, a 32-bar
+arrangement with a breakdown, random ghosts and accents, and two filters that move on their own.
+
+```ruby
+def dnb
+  var ticks 0
+  var bars 0
+  var reese 64                           # the bass filter, a random walk
+  var rise 0                            # the break filter, opens over the breakdown
+  launch 384
+  in clock 24:                          # every sixteenth
+    ticks add ticks 1
+    a mod sub ticks 1 16                # step in the bar, 0..15
+    if eq a 0:
+      if eq bars 0: tempo 174
+      bars add bars 1
+      reese add reese sub rnd 25 12       # the bass filter drifts each bar
+      if lt reese 30: reese 30
+      if gt reese 120: reese 120
+      trk 7:
+        par.set fx1 2 reese
+    b mod sub bars 1 32                 # bar in the arrangement, 0..31
+    c and gt b 11 lt b 16               # bars 13..16: the breakdown
+    if c:
+      if eq a 0:
+        rise add mul sub b 12 30 10     # 10, 40, 70, 100: the break opens
+        trk 6:
+          par.set fx1 2 rise
+    # ... the breakdown, the groove, the reese and the fills: the whole file is linked below
+```
+
+<sub>The whole script, with its comments: [`modules/otype/examples/DNB.OTY`](modules/otype/examples/DNB.OTY).</sub>
+
 OType is a language and an engine for custom firmware: it runs inside a firmware that integrates it, such as
 [OT1](https://github.com/nordseele/ot1). See [who it is for](#who-it-is-for-today).
 
@@ -46,6 +92,25 @@ We tried to cover everything you can edit on the Octatrack:
   `.ot` gain without rewriting the audio.
 
 The full list, by category, is the [command reference](https://nordseele.github.io/otype-docs/).
+
+## What's new in 1.1
+
+A script can now run with the sequencer, not only on a press:
+
+- **live scripts** — `in clock`, `in note`, `in cc`, `in trig`; `var` keeps state between runs; `launch 384` starts on the bar;
+- **MIDI** — `send.note`, `send.cc`, `send.prog`, `send.nrpn` out; `midi.note`, `midi.vel`, `midi.cc` in; `param … cc` follows a knob;
+- **the recorder** — `rt.add`, `rec.src`, `rec.len`, and `rec.arm`, which starts a take now from the inputs, MAIN, CUE or a track;
+- **patterns and links** — `pat.copy`, and `gate` / `in gate` / `out` / `cv` to wire one script to another.
+
+```ruby
+def grab_now
+  in trig 1 all:
+    if and eq trig.hit 1 eq trig.step 1: rec.arm 1
+```
+
+<sub>The trig on step 1 starts a take; RECORDING SETUP sets its source and its length.</sub>
+
+Compatibility: `module` is refused (write `in clock n`); the names `in`, `var`, `launch`, `gate`, `out` and `cv` are reserved.
 
 ## Coming in 1.2
 
@@ -95,16 +160,34 @@ The essentials, in short (the full rules are in the [language reference](docs/sy
 
 ## A few more scripts
 
-Each of these is a whole script: save it as a `.OTY` file in `/SCRIPTS/` and it appears in your firmware's script menu.
+Each of these is a whole script: save it as a `.OTY` file in `/SCRIPTS/`. A function with `menu` appears in your
+firmware's script menu; a live script starts when your firmware launches it.
 
-### Tempo in one gesture
+### Pads from a MIDI controller
 
-The smallest one: a tempo you reach in one gesture.
+A controller on channel 1 plays tracks 1..8 from notes 60..67, at the note's velocity.
 
 ```ruby
-def tempo_90
-  menu "LAUNCH" >> "TEMPO 90"
-  tempo 90
+def pad_play
+  in note 1:
+    a sub note.num 59
+    if and gt a 0 lt a 9:
+      trk a:
+        trk.level note.vel
+        play a
+```
+
+### A take from a trig
+
+Arm a one-bar capture from MAIN each time the first step of track 1 plays.
+
+```ruby
+def grab
+  in trig 1 all:
+    if and eq trig.hit 1 eq trig.step 1:
+      rec.src 1 3 9
+      rec.len 1 16
+      rec.arm 1 4
 ```
 
 ### A Euclidean rhythm
@@ -118,19 +201,6 @@ def euclid
   trk cur:
     tr.clr
     l 1 16: if er hits 16 i: tr.add i
-```
-
-### Loosen a part
-
-Loosen a programmed part: random micro-timing, and volume locks varied by up to `amt` percent.
-
-```ruby
-def loosen
-  menu "TRIGS" >> "LOOSEN"
-  param amt 20 0 100
-  trk cur:
-    micro.rnd 6
-    pl.vary amp.vol amt
 ```
 
 ### Sample roulette

@@ -354,7 +354,7 @@ class TestFormat(Base):
     def test_examples_compile_clean(self):
         self.assertEqual([str(d) for d in self.c_ex.diags], [])
         self.assertEqual(self.c_ex.nrefused, 0)
-        self.assertEqual(self.t_ex.nfunc, 33)         # 18 + LEGACY.OTY 15
+        self.assertEqual(self.t_ex.nfunc, 35)         # 18 + LEGACY.OTY 15 + DNB.OTY 1 + DNBFILL.OTY 1
 
     def test_kitchen_is_clean(self):
         bad = [str(d) for d in self.prog_k.diags if d.level == "error"]
@@ -382,7 +382,7 @@ class TestFormat(Base):
 
     def test_big_endian_header(self):
         d = self.c_ex.data
-        self.assertEqual(int.from_bytes(d[6:8], "big"), 33)          # function count
+        self.assertEqual(int.from_bytes(d[6:8], "big"), 35)          # function count
         self.assertEqual(int.from_bytes(d[28:30], "big"), len(d))    # total size
 
     def test_function_order_is_the_checkers(self):
@@ -851,7 +851,7 @@ class TestPage(unittest.TestCase):
 
     def test_old_tables_read_as_before(self):
         # a table without page functions: every host mask is 0 or 1, nothing after the counters
-        c = otb.compile_program(otype.check_files(EXAMPLES[:1] + EXAMPLES[1:3]))
+        c = otb.compile_program(otype.check_files(EXAMPLES[:1] + EXAMPLES[2:4]))   # no live, no page
         t = otb.parse(c.data)
         self.assertTrue(all(f.hosts in (0, 1) and f.page is None for f in t.funcs))
 
@@ -1081,7 +1081,7 @@ class TestEquivalence(Base):
         n = self.run_all(self.prog_ex, self.t_ex)
         self.assertGreaterEqual(n, 7)             # the menu functions and the argument-less bricks
         menus = [f.name for f in self.prog_ex.funcs if f.menus and not f.args]
-        self.assertEqual(menus, ["BOOMBAP", "POOL_FILL", "POOL_REFILL", "POOL_SHUFFLE", "POOL_CLEAR", "RND_LFO", "RND_FX", "SCENES_GEN", "SCENES_CLR",
+        self.assertEqual(menus, ["BOOMBAP", "DNB_FILL", "POOL_FILL", "POOL_REFILL", "POOL_SHUFFLE", "POOL_CLEAR", "RND_LFO", "RND_FX", "SCENES_GEN", "SCENES_CLR",
                                  "RND_PLOCKS", "RND_SMPLOCKS", "CLR_PLOCKS", "CLR_SMPLOCKS", "TRIGLESS", "INIT_TRACK", "KICKS", "KIT_LOCK", "FOUR", "AB_EUCLID", "WALK", "SPRINKLE",
                                  "EUCLID_HATS", "AB_LOCKS", "TWO_EUCLIDS"])
 
@@ -1249,7 +1249,7 @@ class TestCLI(Base):
     def test_dump_listing(self):
         rc, out, err = self.cli("dump", *EXAMPLES)
         self.assertEqual(rc, 0, err)
-        self.assertIn("OTB format 1  language 1  33 functions, 0 refused", out)
+        self.assertIn("OTB format 1  language 1  35 functions, 0 refused", out)
         for f in self.t_ex.funcs:
             self.assertIn(f.show() + "  (", out)
 
