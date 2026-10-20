@@ -115,6 +115,7 @@
 #define OTC_VM_H
 
 #include <stdint.h>
+#include <stddef.h>
 
 /* ---- caps (the table's declared max_stack / max_ctx / max_ctl must fit; otc_vm_load checks) --- */
 #define OTC_MAX_FRAMES   8       /* call depth, the root included (spec 10) */
@@ -124,10 +125,14 @@
 #define OTC_MAX_PARAMS   8       /* params of one function (spec 4); a page function has at most OTC_PAGE_PARAMS */
 #define OTC_PAGE_PARAMS  6
 #define OTC_PAGE_LABEL   8       /* longest page label */
+#define OTC_MODULE_LABEL 8       /* longest module label */
 #define OTC_CONFIRM_TEXT 127     /* longest `confirm "TEXT"` (a string constant, spec 2) */
 #define OTC_FL_CONFIRM_TEXT 0x04 /* function entry flags (byte 23): the confirm text's pool offset ends the aux data */
 #define OTC_FL_TYPED_PARAMS 0x08 /* function entry flags: typed parameters auxiliary tail present */
 #define OTC_FL_INPUT_SAMPLE 0x10 /* function entry flags: input sample declared */
+#define OTC_FL_VARS         0x20 /* function entry flags: var initial values auxiliary tail present */
+#define OTC_FL_PARAM_SOURCES 0x40 /* function entry flags: parameter sources auxiliary tail present */
+#define OTC_FL_LAUNCH    0x80 /* function entry flags: `launch N` auxiliary tail present (2 bytes: the launch quantum in ticks) */
 #define OTC_PK_INT        0
 #define OTC_PK_BOOL       1
 #define OTC_PK_OPTION     2
@@ -151,6 +156,7 @@
 #define OTC_MAX_INSNS    50000000u   /* safety net against a corrupt table that loops (uncharged) */
 
 /* ---- error codes ----------------------------------------------------------------------------- */
+#define OTC_EV_GATE       5   /* otb_host_cur_ev_type(): a script gate (`in gate`) */
 #define OTC_E_COST        1   /* cost > OTC_MAX_COST (Python RunError "run too long"), or the insn net */
 #define OTC_E_TABLE       2   /* corrupt table / VMError: bad opcode, empty-stack pop, bad pool offset,
                                * depth beyond the declared numbers, call depth > 8, break outside a loop */
@@ -304,6 +310,40 @@ int32_t otb_host_cat_add(const char *path);
 int32_t otb_host_cat_save(const char *name, char *out, uint32_t cap);
 int32_t otb_host_norm(const char *path, int32_t db);
 
+/* ---- imports: sequencer / modules (asm on the unit, host_shim.c on the Mac) --------- */
+void     otb_host_module_play(uint32_t track0, const uint8_t *locks32);
+uint32_t otb_host_seq_run(void);
+uint32_t otb_host_seq_step(uint32_t track0);
+uint32_t otb_host_seq_mute(uint32_t track0);
+uint32_t otb_host_note_num(void);
+uint32_t otb_host_note_vel(void);
+uint32_t otb_host_note_ch(void);
+uint32_t otb_host_cc_num(void);
+uint32_t otb_host_cc_val(void);
+uint32_t otb_host_cc_ch(void);
+uint32_t otb_host_trig_track(void);
+uint32_t otb_host_trig_step(void);
+uint32_t otb_host_trig_hit(void);
+uint32_t otb_host_trig_val(void);
+uint32_t otb_host_trig_genre(void);
+uint32_t otb_host_cur_ev_type(void);
+/* the script gates: `gate n` posts one, `in gate NAME n:` wakes on it, `out n v` / `cv NAME n` share
+ * the outputs, and the current GATE event carries the master's 8-byte name and its output. */
+void     otb_host_gate(uint32_t out);                       /* emit a gate on out 1..4 for the running script */
+void     otb_host_out(uint32_t out, int32_t v);             /* publish v on out 1..4 of the running script */
+int32_t  otb_host_cv(const char *name, uint32_t len, uint32_t out);   /* the value, 0 if the script is not running */
+uint32_t otb_host_gate_out(void);                           /* the current gate event's output (1..4) */
+void     otb_host_cur_ev_name(uint8_t *out8);               /* the current gate event's source name, 8 bytes zero padded */
+uint32_t otb_host_gate_ran(void);                           /* 1 if the running script already ran at this tick */
+void     otb_host_gate_defer(void);                         /* post the current gate event one tick later (feedback) */
+uint32_t otb_host_midi_cc(uint32_t ch, uint32_t num);    /* the MIDI IN tables: last CC / note / velocity per channel */
+uint32_t otb_host_midi_note(uint32_t ch);
+uint32_t otb_host_midi_vel(uint32_t ch);
+void     otb_host_send_note(uint32_t ch, uint32_t note, uint32_t vel, uint32_t dur);
+void     otb_host_send_cc(uint32_t ch, uint32_t num, uint32_t val);
+void     otb_host_send_prog(uint32_t ch, uint32_t prog);
+void     otb_host_send_nrpn(uint32_t ch, uint32_t par, uint32_t val);   /* 4 CC at once, or none at all */
+
 /* ---- state ----------------------------------------------------------------------------------- */
 typedef struct {            /* context scope (spec 6.2 / 14.2) */
     uint32_t mlo, mhi;      /* steps 1..32, 33..64 (bit s-1) */
@@ -335,8 +375,9 @@ typedef struct {            /* a function of the table, validated by otc_vm_load
     uint32_t code, aux, ctr, lines;       /* byte offsets in the table (aux: params, args; ctr: counters) */
     uint16_t code_len, nlines, def_line, cbase;
     uint8_t nargs, nparams, maxs, maxc, maxl, nctr;
-    uint16_t page;                        /* pool offset of the page label (host bit PAGE), 0 = not a page function */
+    uint16_t tag_label;                   /* pool offset of page or module label, 0 = neither */
 } otc_fn_t;
+_Static_assert(sizeof(otc_fn_t) == 32, "otc_fn_t size");
 
 typedef struct {            /* persistent state of a function (sim.FSTATE_DEFAULT) */
     int32_t flip, o, o_min, o_max, o_wrap, o_inc, drunk, d_min, d_max, d_wrap;
@@ -374,13 +415,25 @@ typedef struct otc_vm {
     uint32_t slot[OTC_STREAM_SLOTS];      /* xorshift32 states */
     /* persistent between runs (otc_vm_reset_state) */
     int32_t g[4];                         /* x y z t */
+    uint8_t nvars;
+    int16_t vars[16];
     const char *folder_path[OTC_MAX_PARAMS]; /* folder param paths passed by host */
     uint8_t folder_len[OTC_MAX_PARAMS];
     otc_fn_t fn[OTC_MAX_FUNCS];
     otc_fstate_t fs[OTC_MAX_FUNCS];
     int32_t ctr_val[OTC_MAX_COUNTERS];
     uint8_t ctr_set[OTC_MAX_COUNTERS];
+    uint8_t nx_locks[32];                 /* next-hit locks for module `play`, 0xFF = none */
 } otc_vm_t;
+
+/* Layout read by assembly hosts (modules/otype/seq.S) */
+#if UINTPTR_MAX == 0xffffffff
+_Static_assert(offsetof(otc_vm_t, nframes) == 23, "layout read by assembly hosts");
+_Static_assert(offsetof(otc_vm_t, npset) == 24, "layout read by assembly hosts");
+#else
+_Static_assert(offsetof(otc_vm_t, nframes) == 27, "layout read by assembly hosts");
+_Static_assert(offsetof(otc_vm_t, npset) == 28, "layout read by assembly hosts");
+#endif
 
 int32_t otb_host_control_read(uint32_t handler, uint32_t track0, uint32_t n);
 int32_t otb_host_control_write(uint32_t handler, uint32_t track0, uint32_t n, int32_t value);
@@ -395,6 +448,14 @@ uint32_t otc_vm_sizeof(void);
 /* Length (1..8) of the page label of function `fn` and its first byte in *label (may be NULL), or 0: `fn` is not a page
  * function (or out of range, or no table loaded). */
 uint32_t otc_vm_fn_page(const otc_vm_t *vm, uint32_t fn, const char **label);
+/* Length (1..8) of the module label of function `fn` and its first byte in *label (may be NULL), or 0: `fn` is not a module
+ * function (or out of range, or no table loaded). */
+uint32_t otc_vm_fn_module(const otc_vm_t *vm, uint32_t fn, const char **label);
+/* Clock ticks declared for module function `fn` (1..96), or 0: `fn` is not a module. */
+uint32_t otc_vm_fn_clock(const otc_vm_t *vm, uint32_t fn);
+/* Launch quantum in ticks declared by `launch N` on function `fn` (1..32767), or 0: no `launch` (flag bit 0x80 of the entry;
+ * its 2 bytes end the aux data of the function). */
+uint32_t otc_vm_fn_launch(const otc_vm_t *vm, uint32_t fn);
 /* Length (1..127) of the text of `confirm "TEXT"` of function `fn` (the first non-empty one the source declares; flag bit 2 of
  * the entry, the pool offset after the page label in the aux data) and its first byte in *text (may be NULL; INTO the table,
  * no NUL), or 0: no text (a plain `confirm`, an implied confirmation, none at all; or `fn` out of range / no table). The
@@ -417,6 +478,8 @@ typedef struct {
 /* Param `k` (declaration order: A, B, C ... on the page) of function `fn` into *out: 1, or 0 when `fn` or `k` does not exist
  * (so `for (k = 0; otc_vm_fn_param(vm, fn, k, &p); k++)` walks them). */
 int otc_vm_fn_param(const otc_vm_t *vm, uint32_t fn, uint32_t k, otc_vm_param_t *out);
+int otc_vm_fn_param_src(const otc_vm_t *vm, uint32_t fn, uint32_t k, uint8_t *out_kind, uint8_t *out_ch, uint8_t *out_num);
+uint32_t otc_vm_fn_vars(const otc_vm_t *vm, uint32_t fn, int16_t *vals, uint32_t n);
 /* Impose the params of the ROOT function of the next runs (what `otype.py run --param` does in the Python VM): param k of
  * the root function reads vals[k], clamped to its min..max, for k < n; the others keep their default. Nested calls never see
  * it. n = 0 clears; n is cut to OTC_MAX_PARAMS. Persistent until cleared; otc_vm_load clears it. */
@@ -424,6 +487,8 @@ void otc_vm_set_params(otc_vm_t *vm, const int16_t *vals, uint32_t n);
 /* Impose the folder path of a folder param of the ROOT function for the next runs. Persistent until cleared;
  * otc_vm_load / otc_vm_reset_state clears it. path = NULL clears param k. */
 void otc_vm_set_param_folder(otc_vm_t *vm, uint32_t k, const char *path, uint32_t len);
+void otc_vm_set_vars(otc_vm_t *vm, const int16_t *vals, uint32_t n);
+void otc_vm_get_vars(const otc_vm_t *vm, int16_t *vals, uint32_t n);
 int otc_vm_load(otc_vm_t *vm, const uint8_t *otb, uint32_t len);
 void otc_vm_reset_state(otc_vm_t *vm);
 /* Bind track 1..8: `trac` = its 0x91a-byte TRAC block (every write goes there), `copy` = NULL or the

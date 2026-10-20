@@ -43,9 +43,10 @@ FAMILY_BITS = OrderedDict((("LANG", 0x01), ("CTX", 0x02), ("EDIT", 0x04), ("IO_R
                            ("PLAY", 0x80), ("ASK", 0x100)))      # PLAY, ASK: reserved
 TOUCH_BITS = OrderedDict((("TRAC", 1), ("PART", 2), ("SLOTS", 4)))
 HOST_BITS = OrderedDict((("MENU", 0x01), ("TRIG", 0x02), ("LOOP", 0x04), ("PAT", 0x08),
-                         ("FILL", 0x10), ("LOAD", 0x20), ("MIDI", 0x40), ("PAGE", 0x80)))   # MENU and PAGE so far;
-                                                                                   # bits 1..6 stay reserved
-F_DESTRUCTIVE, F_CONFIRM, F_CONFIRM_TEXT, F_TYPED_PARAMS, F_INPUT_SAMPLE = 1, 2, 4, 8, 16
+                         ("FILL", 0x10), ("LOAD", 0x20), ("MODULE", 0x40), ("PAGE", 0x80),
+                         ("GATE", 0x100), ("CC", 0x200)))
+F_DESTRUCTIVE, F_CONFIRM, F_CONFIRM_TEXT, F_TYPED_PARAMS, F_INPUT_SAMPLE, F_VARS, F_PARAM_SOURCES = 1, 2, 4, 8, 16, 32, 64
+F_LAUNCH = 128      # `launch N` of a live script: 2 bytes (the ticks) end the aux data
 
 ALWAYS_ALLOWED = ("LANG", "CTX", "STATE")      # families no host forbids (not shown by the dump)
 
@@ -92,6 +93,8 @@ INSTRS = [
     Ins(0x43, "prob", "H", "-1", "pop p, one draw of the prob stream; forward jump unless it is < p"),
     Ins(0x44, "every", "BH", "-1", "pop n, step counter k; forward jump unless it fires"),
     Ins(0x45, "skip", "BH", "-1", "pop n, step counter k; forward jump if it fires"),
+    Ins(0x46, "jnev", "BBBH", "0", "jump forward unless current event matches (kind, ch, num)"),
+    Ins(0x47, "jngt", "HBH", "0", "jump forward unless the current event is a gate on output n of the script whose name is the pool string"),
     Ins(0x50, "lbeg", "H", "-2", "begin l: pops b, a; the loop ends at the target"),
     Ins(0x51, "lnext", "H", "0", "end of an l iteration: next one (jump back) or leave the loop"),
     Ins(0x52, "ebeg", "H", "0", "begin each over the steps of the context; empty: jump to the end"),
@@ -112,7 +115,7 @@ INSTRS = [
 INS = OrderedDict((i.code, i) for i in INSTRS)
 BY_NAME = OrderedDict((i.name, i) for i in INSTRS)
 BACKWARD = ("lnext", "enext", "pnext")          # the only instructions that jump backward
-JUMPS = ("jmp", "jz", "sel", "prob", "every", "skip", "lbeg", "ebeg", "pass")   # forward
+JUMPS = ("jmp", "jz", "sel", "prob", "every", "skip", "lbeg", "ebeg", "pass", "jnev", "jngt")   # forward
 
 
 def fam_names(mask, all_=False):
@@ -378,6 +381,8 @@ class FuncCompiler:
             self.emit("pushc", self.cond(n.val), stack=1)
         elif k == "var":
             self.emit("ld", self.var(n.name), stack=1)
+        elif k == "var_named":
+            self.emit("ld", 16 + n.var_info.slot, stack=1)
         elif k == "arg":
             self.emit("lda", self.args.index(n.name), stack=1)
         elif k == "param":
@@ -489,6 +494,9 @@ class FuncCompiler:
         if k == "assign":
             self.expr(s.args[0])
             self.emit("st", self.var(s.name), stack=-1)
+        elif k == "assign_var_named":
+            self.expr(s.args[0])
+            self.emit("st", 16 + s.var_info.slot, stack=-1)
         elif k == "opstmt":
             self.op_node(s.node)
             if s.node.op.ret is not None:
@@ -613,6 +621,23 @@ class FuncCompiler:
         while i < n:
             ln = lines[i]
             if ln.decl is not None or ln.error:
+                i += 1
+                continue
+            if getattr(ln, "in_block", None) is not None:
+                ib = ln.in_block
+                end_lbl = Label()
+                if ib.kind == "GATE":
+                    self.jump("jngt", end_lbl, self.pool.string(ib.name), ib.ch)
+                    self.block(ln.children)
+                    self.place(end_lbl)
+                    i += 1
+                    continue
+                kind_code = {"CLOCK": 1, "NOTE": 2, "CC": 3, "TRIG": 4}.get(ib.kind, 0)
+                ch_code = ib.ch if ib.ch is not None else 0
+                num_code = ib.num if ib.num is not None else 255
+                self.jump("jnev", end_lbl, kind_code, ch_code, num_code)
+                self.block(ln.children)
+                self.place(end_lbl)
                 i += 1
                 continue
             fk = ln.first_kind()
@@ -791,6 +816,7 @@ def compile_program(prog, profile=None):
         file_off = pool.string(f.file)
         menu_off = pool.menus([list(lv) + [act] for lv, act, _l in f.menus]) if f.menus else 0
         page_off = pool.string(f.page[0]) if f.page is not None else 0      # the page label follows the menu list
+        module_off = pool.string(f.module[0]) if f.module is not None else 0
         conf_off = pool.string(f.confirm_text[0]) if f.confirm_text is not None else 0   # then the confirm text
         has_typed = any(getattr(v, "kind", "INT") != "INT" for v in f.params.values())
         pnames = []
@@ -811,12 +837,33 @@ def compile_program(prog, profile=None):
         e = OrderedDict()
         e["name"] = f.name
         e["menu_off"] = menu_off
-        e["hosts"] = (HOST_BITS["MENU"] if f.menus else 0) | (HOST_BITS["PAGE"] if f.page is not None else 0)
+        e["hosts"] = ((HOST_BITS["MENU"] if f.menus else 0)
+                      | (HOST_BITS["PAGE"] if f.page is not None else 0)
+                      | (HOST_BITS["MODULE"] if f.module is not None else 0)
+                      | (HOST_BITS["TRIG"] if any(b.kind == "TRIG" for b in getattr(f, "in_blocks", [])) else 0)
+                      | (HOST_BITS["GATE"] if any(b.kind == "GATE" for b in getattr(f, "in_blocks", [])) else 0)
+                      | (HOST_BITS["CC"] if any(b.kind == "CC" for b in getattr(f, "in_blocks", [])) else 0))
         e["families"], e["touches"] = fam, tch
+        has_vars = bool(getattr(f, "vars", None))
+        has_param_sources = any(getattr(v, "src", None) is not None for v in f.params.values())
         e["flags"] = ((F_DESTRUCTIVE if prog.destructive.get(f) else 0) | (F_CONFIRM if f.confirm else 0)
                       | (F_CONFIRM_TEXT if f.confirm_text is not None else 0)
                       | (F_TYPED_PARAMS if has_typed else 0)
-                      | (F_INPUT_SAMPLE if getattr(f, "input_sample", False) else 0))
+                      | (F_INPUT_SAMPLE if getattr(f, "input_sample", False) else 0)
+                      | (F_VARS if has_vars else 0)
+                      | (F_PARAM_SOURCES if has_param_sources else 0)
+                      | (F_LAUNCH if getattr(f, "launch", None) is not None else 0))
+        note_chs = set()
+        for b in getattr(f, "in_blocks", []):
+            if b.kind == "NOTE":
+                note_chs.add(b.ch if b.ch is not None else 255)
+        if len(note_chs) == 1:
+            note_ch = next(iter(note_chs))
+        elif len(note_chs) > 1:
+            note_ch = 255
+        else:
+            note_ch = 0
+        e["note_ch"] = note_ch
         e["max_cost"], e["ns_mask"] = min(prog.maxcost.get(f, 0), 0xFFFFFFFF), ns   # saturated
         e["nargs"], e["nparams"], e["nlocals"] = len(f.args), len(f.params), fc.nlocals
         e["max_stack"], e["max_ctx"], e["max_ctl"], e["nctr"] = fc.maxdepth, fc.maxctx, fc.maxctl, len(fc.ctrs)
@@ -831,8 +878,15 @@ def compile_program(prog, profile=None):
             aux += struct.pack(">HBB", line, midx, 0)
         if f.page is not None:
             aux += struct.pack(">H", page_off)                  # the label's pool offset ends the aux data
+        if f.module is not None:
+            clk = f.clock[0] if f.clock is not None else 0
+            aux += struct.pack(">HH", module_off, clk)   # pool offset du nom (2B) + clock ticks (2B)
         if f.confirm_text is not None:
             aux += struct.pack(">H", conf_off)                  # the confirm text's pool offset, after the page label
+        if has_vars:
+            aux += struct.pack(">H", len(f.vars))
+            for vinfo in f.vars.values():
+                aux += struct.pack(">h", vinfo.init)
         if has_typed:
             types_mask = 0
             for k, (nm, v) in enumerate(f.params.items()):
@@ -848,6 +902,19 @@ def compile_program(prog, profile=None):
                     aux += struct.pack(">H", len(v.labels))
                     for lbl in v.labels:
                         aux += struct.pack(">H", pool.string(lbl))
+        if has_param_sources:
+            for nm, v in f.params.items():
+                src = getattr(v, "src", None)
+                if src is None:
+                    aux += struct.pack(">BBBB", 0, 0, 0, 0)
+                elif src[0] == "cc":
+                    aux += struct.pack(">BBBB", 1, src[1], src[2], 0)
+                elif src[0] == "note":
+                    aux += struct.pack(">BBBB", 2, src[1], 0, 0)
+                elif src[0] == "vel":
+                    aux += struct.pack(">BBBB", 3, src[1], 0, 0)
+        if getattr(f, "launch", None) is not None:
+            aux += struct.pack(">H", f.launch[0])                 # `launch N`: its ticks end the aux data
         e["line_off"], e["nlines"] = len(lines_r), len(fc.lines)
         for pc, line in fc.lines:
             lines_r += struct.pack(">HH", pc, line)
@@ -873,7 +940,7 @@ def compile_program(prog, profile=None):
         ftab += struct.pack(">HHHBBIIBBBBBBBBHHHHHHH", e["menu_off"], e["hosts"], e["families"],
                             e["touches"], e["flags"], e["max_cost"], e["ns_mask"],
                             e["nargs"], e["nparams"], e["nlocals"], e["max_stack"],
-                            e["max_ctx"], e["max_ctl"], e["nctr"], 0,
+                            e["max_ctx"], e["max_ctl"], e["nctr"], e.get("note_ch", 0),
                             e["file_off"], e["def_line"], e["code_off"], e["code_len"],
                             e["aux_off"], e["line_off"], e["nlines"])
     assert len(ftab) == FENT * len(entries), len(ftab)
@@ -981,10 +1048,22 @@ def parse(data):
         if f.hosts & HOST_BITS["PAGE"]:
             f.page = t.pool.string(struct.unpack_from(">H", data, ap)[0])
             ap += 2
+        f.module = None
+        f.clock = None
+        if f.hosts & HOST_BITS["MODULE"]:
+            f.module = t.pool.string(struct.unpack_from(">H", data, ap)[0])
+            f.clock = struct.unpack_from(">H", data, ap + 2)[0]
+            ap += 4
         f.confirm_text = None
         if f.flags & F_CONFIRM_TEXT:
             f.confirm_text = t.pool.string(struct.unpack_from(">H", data, ap)[0])
             ap += 2
+        f.vars = []
+        if f.flags & F_VARS:
+            nvars, = struct.unpack_from(">H", data, ap)
+            ap += 2
+            f.vars = list(struct.unpack_from(">%dh" % nvars, data, ap))
+            ap += 2 * nvars
         if f.flags & F_TYPED_PARAMS:
             types_mask, = struct.unpack_from(">H", data, ap)
             ap += 2
@@ -1026,6 +1105,20 @@ def parse(data):
             for pname, (d, lo, hi) in f.params.items():
                 new_params[pname] = O.Param(d, lo, hi, kind="INT")
             f.params = new_params
+        if f.flags & F_PARAM_SOURCES:
+            for nm, v in f.params.items():
+                kind, ch, num, _z = struct.unpack_from(">BBBB", data, ap)
+                ap += 4
+                if kind == 1:
+                    v.src = ("cc", ch, num)
+                elif kind == 2:
+                    v.src = ("note", ch)
+                elif kind == 3:
+                    v.src = ("vel", ch)
+        f.launch = None
+        if f.flags & F_LAUNCH:
+            f.launch, = struct.unpack_from(">H", data, ap)
+            ap += 2
         lp = t.line_off + line_off
         f.lines = [struct.unpack_from(">HH", data, lp + 4 * i) for i in range(nlines)]
         f.code = data[t.code_off + code_off:t.code_off + code_off + code_len]
@@ -1084,7 +1177,7 @@ def fmt_instr(t, f, ins, ops):
         from modules.otype import sim
         return "pushc %s" % (sim.cond_name(ops[0]) if ops[0] < len(sim.COND_NAMES) else "?%d" % ops[0])
     if n in ("ld", "st"):
-        return "%s %s" % (n, VARS[ops[0]].lower() if ops[0] < len(VARS) else "?")
+        return "%s %s" % (n, VARS[ops[0]].lower() if ops[0] < len(VARS) else ("var%d" % (ops[0] - 16) if ops[0] >= 16 else "?"))
     if n == "lda":
         return "lda %s" % (O.show(f.args[ops[0]]) if ops[0] < len(f.args) else "?%d" % ops[0])
     if n == "ldp":
@@ -1103,6 +1196,11 @@ def fmt_instr(t, f, ins, ops):
     if n in JUMPS or n in BACKWARD:
         if n in ("every", "skip"):
             return "%s #%d @%04x" % (n, ops[0], ops[1])
+        if n == "jnev":
+            kind_name = {1: "clock", 2: "note", 3: "cc"}.get(ops[0], "?%d" % ops[0])
+            return "jnev %s %d %d @%04x" % (kind_name, ops[1], ops[2], ops[3])
+        if n == "jngt":
+            return "jngt %s %d @%04x" % (t.pool.describe(ops[0]), ops[1], ops[2])
         return "%s @%04x" % (n, ops[-1])
     if n == "call":
         g = t.funcs[ops[0]] if ops[0] < len(t.funcs) else None
@@ -1117,7 +1215,7 @@ def fmt_instr(t, f, ins, ops):
 def func_listing(t, f, sources=None):
     """The listing of one function: a header line, params/args, then one instruction per line."""
     lines = []
-    menu = "; ".join(" > ".join(m) for m in f.menus) or ("(page only)" if f.page is not None else "(brick, no menu)")
+    menu = "; ".join(" > ".join(m) for m in f.menus) or ("(page only)" if f.page is not None else ("(module only)" if f.module is not None else "(brick, no menu)"))
     fam = " ".join(fam_names(f.families)) or "-"
     tch = " ".join(n for n, b in TOUCH_BITS.items() if f.touches & b) or "-"
     loc = " ".join("abcd"[:f.nlocals]) or "-"
@@ -1138,8 +1236,12 @@ def func_listing(t, f, sources=None):
                  % (hosts, nss, len(f.code), f.code_off, len(f.lines), len(f.counters)))
     if f.page is not None:
         lines.append('  page   "%s"' % f.page)
+    if f.module is not None:
+        lines.append('  module "%s" (clock %d)' % (f.module, f.clock))
     if f.confirm_text is not None:
         lines.append('  confirm "%s"' % f.confirm_text)
+    if getattr(f, "launch", None) is not None:
+        lines.append("  launch %d" % f.launch)
     if f.args:
         lines.append("  args   %s" % " ".join(O.show(a) for a in f.args))
     for k, (nm, p) in enumerate(f.params.items()):

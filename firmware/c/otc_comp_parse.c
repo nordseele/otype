@@ -202,6 +202,54 @@ static int pp_find_param(const pp_t *p, const uint8_t *s, uint32_t n, int up)
     return 0;
 }
 
+/* the `var` of this function named so (offset), or 0; visibility is checked by the caller */
+static uint32_t pp_find_var(const pp_t *p, const uint8_t *s, uint32_t n, int up)
+{
+    const otc_comp_t *c = p->c;
+    const otc_func_t *f = FN(c, p->fn);
+    uint32_t q;
+    for (q = f->module_label ? PTR(c, otc_live_t, f->module_label)->var_first : 0; q; q = PTR(c, otc_var_t, q)->next)
+        if (cc_ref_eq(c, PTR(c, otc_var_t, q)->name, s, n, up))
+            return q;
+    return 0;
+}
+
+/* Python resolve_word: a var of a block is only visible inside that block */
+static int pp_var_visible(const otc_comp_t *c, const otc_var_t *v)
+{
+    return v->scope == 0 || v->scope == c->cur_ib;
+}
+
+/* the value of an integer const token, or 0 (the caller emits the message) */
+static int pp_int_const(const pp_t *p, const tok_t *t, int32_t *out)
+{
+    uint32_t k;
+    if (t->kind == T_NUM) {
+        *out = t->val;
+        return 1;
+    }
+    if (t->kind == T_WORD && (k = cc_cmap_find(p->c, tk_ptr(p, t), tk_len(t), 1)) != 0 &&
+        !CN(p->c, k)->bad && CN(p->c, k)->type == OTC_CT_INT) {
+        *out = (int32_t)CN(p->c, k)->val;
+        return 1;
+    }
+    return 0;
+}
+
+/* the otc_live_t of this function, allocated on first use */
+static otc_live_t *pp_live(otc_comp_t *c, otc_func_t *f)
+{
+    uint32_t off;
+    if (f->module_label)
+        return PTR(c, otc_live_t, f->module_label);
+    off = cc_alloc(c, (uint32_t)sizeof(otc_live_t));
+    if (!off)
+        return 0;
+    cc_zero(PTR(c, otc_live_t, off), (uint32_t)sizeof(otc_live_t));
+    f->module_label = off;
+    return PTR(c, otc_live_t, off);
+}
+
 /* tools/otype.py RENAMED / REMOVED: the word, its replacement (removed = 0) or the cookbook recipe (removed = 1) */
 static const struct { const char *word, *text; int removed; } pp_retired[] = {
     {"RATCH", "ratch.set", 0}, {"FX.SET", "fx.type", 0}, {"FILE.N", "file.len", 0},
@@ -220,6 +268,18 @@ static int pp_check_renamed(pp_t *p, const uint8_t *w, uint32_t wn)
 {
     otc_comp_t *c = p->c;
     unsigned k;
+    if (cc_ci_eq(w, wn, "MODULE")) {                    /* tools/otype.py retired(): checked before every other name */
+        mb_begin(c);
+        mb_lit(c, "module is gone: use in clock n");
+        pp_raise(p);
+        return 1;
+    }
+    if (cc_ci_eq(w, wn, "CLOCK")) {
+        mb_begin(c);
+        mb_lit(c, "clock declaration is gone: use in clock n");
+        pp_raise(p);
+        return 1;
+    }
     for (k = 0; k < sizeof(pp_retired) / sizeof(pp_retired[0]); k++) {
         if (!cc_ci_eq(w, wn, pp_retired[k].word))
             continue;
@@ -245,8 +305,26 @@ static uint32_t pp_word(pp_t *p, const tok_t *t)       /* resolve_word */
     const uint8_t *w = tk_ptr(p, t);
     uint32_t n = tk_len(t), k;
     int opi;
+    if (pp_check_renamed(p, w, n))                      /* retired(): before the variables, like resolve_word */
+        return 0;
     if (cc_in_set(OTC_SET_VARS, w, n, 1))
         return pp_kw_node(p, t, OTC_N_VAR);
+    k = pp_find_var(p, w, n, 1);
+    if (k) {
+        const otc_var_t *v = PTR(c, otc_var_t, k);
+        uint32_t node;
+        if (!pp_var_visible(c, v)) {
+            mb_begin(c);
+            mb_lit(c, "var ");
+            mb_show(c, w, n, 1);
+            mb_lit(c, " is not visible in this block");
+            return pp_raise(p);
+        }
+        node = pp_kw_node(p, t, OTC_N_VAR_NAMED);
+        if (node)
+            ND(c, node)->val = v->slot;
+        return node;
+    }
     if (pp_find_arg(p, t))
         return pp_kw_node(p, t, OTC_N_ARG);
     if (pp_find_param(p, w, n, 1))
@@ -283,8 +361,6 @@ static uint32_t pp_word(pp_t *p, const tok_t *t)       /* resolve_word */
         mb_show(c, w, n, 1);
         return pp_raise(p);
     }
-    if (pp_check_renamed(p, w, n))
-        return 0;
     mb_begin(c);
     mb_lit(c, "unknown name ");
     mb_show(c, w, n, 1);
@@ -511,6 +587,51 @@ static int pp_op_args(pp_t *p, uint32_t node, const otc_reg_t *r)
                     pp_link(p, node, &last, n, OTC_K_STEP);
                 }
             }
+        } else if (k == OTC_K_NAME) {
+            int np;
+            t = pp_peek(p, 0);
+            if (pp_at_end(p, 0) || !t) {
+                if (i >= r->minargs)
+                    break;
+                return (int)pp_need(p, r, ND(c, node)->val);
+            }
+            if (t->kind != T_WORD) {
+                tok_t kt;
+                tk_set(&kt, t);
+                mb_begin(c);
+                mb_rstr(c, r->shown);
+                mb_lit(c, ": expected a function name, got ");
+                mb_tokshow(p, &kt);
+                return (int)pp_raise(p);
+            }
+            {
+                tok_t kt;
+                tk_set(&kt, t);
+                np = cc_name_problem(tk_ptr(p, &kt), tk_len(&kt), 1, 1);
+                if (np) {
+                    mb_begin(c);
+                    mb_rstr(c, r->shown);
+                    mb_lit(c, ": ");
+                    cc_np_text(c, np, tk_ptr(p, &kt), tk_len(&kt), 1);
+                    return (int)pp_raise(p);
+                }
+                if (tk_len(&kt) > 8u) {
+                    mb_begin(c);
+                    mb_rstr(c, r->shown);
+                    mb_lit(c, ": name is too long (");
+                    mb_dec(c, (int32_t)tk_len(&kt));
+                    mb_lit(c, " > 8 characters)");
+                    return (int)pp_raise(p);
+                }
+                pp_adv(p);
+                n = pp_node(p, OTC_N_STR);
+                if (!n)
+                    return 0;
+                ND(c, n)->text = pp_text(p, &kt);
+                if (p->err)
+                    return 0;
+                pp_link(p, node, &last, n, OTC_K_STR);
+            }
         } else if (k == OTC_K_COND) {
             t = pp_peek(p, 0);
             if (t && tk_word_eq(p, t, "FILL")) {
@@ -536,12 +657,30 @@ static int pp_op_args(pp_t *p, uint32_t node, const otc_reg_t *r)
             }
         } else {
             if (pp_at_end(p, 0)) {
-                if (i >= r->minargs) {
+                if (i >= r->minargs) {                     /* an optional argument: its OPT_INT default */
+                    int32_t dv = 0;
+                    uint32_t q, opi = (uint32_t)(r - otc_reg);
+                    char buf[8];
+                    uint32_t bn = 0;
+                    for (q = 0; q < OTC_NARGDEF; q++)
+                        if (otc_argdef[q].op == opi && otc_argdef[q].arg == i)
+                            dv = otc_argdef[q].value;
                     n = pp_node(p, OTC_N_NUM);
                     if (!n)
                         return 0;
-                    ND(c, n)->val = 0;
-                    ND(c, n)->text = cc_str(c, (const uint8_t *)"0", 1, 0);
+                    ND(c, n)->val = (uint32_t)dv;
+                    if (dv < 0) {
+                        buf[bn++] = '-';
+                        dv = -dv;
+                    }
+                    if (dv >= 10)
+                        buf[bn++] = (char)('0' + (dv / 10) % 10);
+                    buf[bn++] = (char)('0' + dv % 10);
+                    ND(c, n)->text = cc_str(c, (const uint8_t *)buf, bn, 0);
+                    if (!ND(c, n)->text) {
+                        p->err = 1;
+                        return 0;
+                    }
                     pp_link(p, node, &last, n, k);
                     continue;
                 }
@@ -739,6 +878,35 @@ static uint32_t pp_statement(pp_t *p)
         if (!n)
             return 0;
         ND(c, n)->first = e;
+        return n;
+    }
+    k = pp_find_var(p, w, wn, 1);
+    if (k) {
+        const otc_var_t *v = PTR(c, otc_var_t, k);
+        if (!pp_var_visible(c, v)) {
+            mb_begin(c);
+            mb_lit(c, "var ");
+            mb_show(c, w, wn, 1);
+            mb_lit(c, " is not visible in this block");
+            return pp_raise(p);
+        }
+        pp_adv(p);
+        if (pp_at_end(p, 0)) {
+            mb_begin(c);
+            mb_show(c, w, wn, 1);
+            mb_lit(c, " alone does nothing (write ");
+            mb_show(c, w, wn, 1);
+            mb_lit(c, " <value> to assign)");
+            return pp_raise(p);
+        }
+        e = pp_term(p);
+        if (!e)
+            return 0;
+        n = pp_stmt_node(p, OTC_N_ASSIGN_VAR_NAMED, &t);
+        if (!n)
+            return 0;
+        ND(c, n)->first = e;
+        ND(c, n)->val = v->slot;
         return n;
     }
     if (pp_find_arg(p, &t)) {
@@ -1092,6 +1260,144 @@ CC_NOINLINE static uint32_t pp_decl(pp_t *p)
         f = FN(c, p->fn);
         f->page_line = p->line_no;
         f->page_label = ref;
+    } else if (tk_word_eq(p, &t, "MODULE")) {               /* gone: a live script uses `in` blocks */
+        return pp_raise_lit(p, "module is gone: use in clock n");
+    } else if (tk_word_eq(p, &t, "CLOCK")) {                /* gone: a live script uses `in` blocks */
+        return pp_raise_lit(p, "clock declaration is gone: use in clock n");
+    } else if (tk_word_eq(p, &t, "VAR")) {                  /* var NAME INIT */
+        otc_live_t *lv;
+        const uint8_t *np_p;
+        uint32_t np_n, vref, vr;
+        int32_t init;
+        int np;
+        if (!pp_next(p, &nm))
+            return 0;
+        np_p = tk_ptr(p, &nm);
+        np_n = tk_len(&nm);
+        np = nm.kind == T_STR ? NP_QUOTED : cc_name_problem(np_p, np_n, tk_up(&nm), nm.kind == T_WORD);
+        if (np) {
+            mb_begin(c);
+            mb_lit(c, "var ");
+            mb_show(c, np_p, np_n, tk_up(&nm));
+            mb_lit(c, ": ");
+            cc_np_text(c, np, np_p, np_n, tk_up(&nm));
+            return pp_raise(p);
+        }
+        {
+            uint32_t a;
+            for (a = 0; a < f->nargs; a++)
+                if (cc_ref_eq(c, PTR(c, uint32_t, f->args)[a] & 0x7FFFFFFFu, np_p, np_n, tk_up(&nm)))
+                    break;
+            if (a < f->nargs) {
+                mb_begin(c);
+                mb_lit(c, "var ");
+                mb_show(c, np_p, np_n, tk_up(&nm));
+                mb_lit(c, " has the name of an argument");
+                return pp_raise(p);
+            }
+        }
+        if (cc_cmap_find(c, np_p, np_n, tk_up(&nm)) || cc_fmap_find(c, np_p, np_n, tk_up(&nm))) {
+            mb_begin(c);
+            mb_lit(c, "var ");
+            mb_show(c, np_p, np_n, tk_up(&nm));
+            mb_lit(c, " has the name of a const or a function");
+            return pp_raise(p);
+        }
+        if (pp_find_param(p, np_p, np_n, tk_up(&nm))) {
+            mb_begin(c);
+            mb_lit(c, "var ");
+            mb_show(c, np_p, np_n, tk_up(&nm));
+            mb_lit(c, " has the name of a param");
+            return pp_raise(p);
+        }
+        if (pp_find_var(p, np_p, np_n, tk_up(&nm))) {
+            mb_begin(c);
+            mb_lit(c, "duplicate var declaration ");
+            mb_show(c, np_p, np_n, tk_up(&nm));
+            return pp_raise(p);
+        }
+        lv = pp_live(c, f);
+        if (!lv) {
+            p->err = 1;
+            return 0;
+        }
+        if (lv->nvars >= 16u) {
+            mb_begin(c);
+            mb_lit(c, "too many vars in function ");
+            mb_show_ref(c, f->name);
+            mb_lit(c, " (at most 16)");
+            return pp_raise(p);
+        }
+        if (!pp_peek(p, 0)) {
+            mb_begin(c);
+            mb_lit(c, "var ");
+            mb_show(c, np_p, np_n, tk_up(&nm));
+            mb_lit(c, ": initial value is missing");
+            return pp_raise(p);
+        }
+        pp_next(p, &v);
+        if (!pp_int_const(p, &v, &init)) {
+            mb_begin(c);
+            mb_lit(c, "var ");
+            mb_show(c, np_p, np_n, tk_up(&nm));
+            mb_lit(c, ": initial value must be a number or an integer const");
+            return pp_raise(p);
+        }
+        vref = cc_str(c, np_p, np_n, tk_up(&nm));
+        vr = cc_alloc(c, (uint32_t)sizeof(otc_var_t));
+        if (!vref || !vr) {
+            p->err = 1;
+            return 0;
+        }
+        f = FN(c, p->fn);
+        lv = pp_live(c, f);
+        if (!lv) {
+            p->err = 1;
+            return 0;
+        }
+        PTR(c, otc_var_t, vr)->next = 0;
+        PTR(c, otc_var_t, vr)->name = vref;
+        PTR(c, otc_var_t, vr)->init = init;
+        PTR(c, otc_var_t, vr)->slot = lv->nvars;
+        PTR(c, otc_var_t, vr)->line = p->line_no;
+        PTR(c, otc_var_t, vr)->scope = c->cur_ib;
+        if (lv->var_last)
+            PTR(c, otc_var_t, lv->var_last)->next = vr;
+        else
+            lv->var_first = vr;
+        lv->var_last = vr;
+        lv->nvars++;
+        ND(c, decl)->val = vref;
+    } else if (tk_word_eq(p, &t, "LAUNCH")) {               /* launch N: the live script's first-wake quantum */
+        otc_live_t *lv = pp_live(c, f);
+        int32_t ticks;
+        if (!lv) {
+            p->err = 1;
+            return 0;
+        }
+        if (lv->launch_line)
+            return pp_raise_lit(p, "duplicate launch declaration (a function has at most one)");
+        if (!pp_peek(p, 0))
+            return pp_raise_lit(p, "launch expects a number of ticks: launch n");
+        pp_next(p, &v);
+        if (!pp_int_const(p, &v, &ticks))
+            return pp_raise_lit(p, "launch n: n must be a number or an integer const");
+        if (ticks < 1) {
+            mb_begin(c);
+            mb_lit(c, "launch n: n must be >= 1 (got ");
+            mb_dec(c, ticks);
+            mb_lit(c, ")");
+            return pp_raise(p);
+        }
+        if (ticks > 32767) {
+            mb_begin(c);
+            mb_lit(c, "launch n: n must be <= 32767 (got ");
+            mb_dec(c, ticks);
+            mb_lit(c, ")");
+            return pp_raise(p);
+        }
+        lv->launch_line = p->line_no;
+        lv->launch_ticks = (uint32_t)ticks;
     } else if (tk_word_eq(p, &t, "INPUT")) {
         if (!pp_next(p, &s))
             return 0;
@@ -1118,6 +1424,7 @@ CC_NOINLINE static uint32_t pp_decl(pp_t *p)
         int32_t vals[3];
         uint32_t i, prm, nref;
         int np;
+        uint8_t src_kind = 0, src_ch = 0, src_num = 0;
         static const char *const what[3] = {"default", "min", "max"};
         const uint8_t *np_p;
         uint32_t np_n;
@@ -1393,6 +1700,100 @@ CC_NOINLINE static uint32_t pp_decl(pp_t *p)
                     mb_byte(c, ')');
                     return pp_raise(p);
                 }
+                {                                  /* an int param may be bound to a MIDI CC, note or velocity */
+                    const tok_t *st = pp_peek(p, 0);
+                    if (st && st->kind == T_WORD &&
+                        (tk_word_eq(p, st, "CC") || tk_word_eq(p, st, "NOTE") || tk_word_eq(p, st, "VEL"))) {
+                        tok_t sk, ct;
+                        int32_t ch = 0, num = 0;
+                        const char *kw;
+                        pp_next(p, &sk);
+                        if (tk_word_eq(p, &sk, "CC")) {
+                            src_kind = 1;
+                            kw = "cc";
+                        } else if (tk_word_eq(p, &sk, "NOTE")) {
+                            src_kind = 2;
+                            kw = "note";
+                        } else {
+                            src_kind = 3;
+                            kw = "vel";
+                        }
+                        if (!pp_peek(p, 0)) {
+                            mb_begin(c);
+                            mb_lit(c, "param ");
+                            mb_show(c, np_p, np_n, tk_up(&nm));
+                            mb_lit(c, " ");
+                            mb_lit(c, kw);
+                            mb_lit(c, src_kind == 1 ? ": channel and cc number required" : ": channel required");
+                            return pp_raise(p);
+                        }
+                        pp_next(p, &ct);
+                        if (pp_find_param(p, tk_ptr(p, &ct), tk_len(&ct), tk_up(&ct))) {
+                            mb_begin(c);
+                            mb_lit(c, "param ");
+                            mb_show(c, np_p, np_n, tk_up(&nm));
+                            mb_lit(c, " ");
+                            mb_lit(c, kw);
+                            mb_lit(c, ": channel cannot be a param (dynamic param not supported)");
+                            return pp_raise(p);
+                        }
+                        if (!pp_int_const(p, &ct, &ch)) {
+                            mb_begin(c);
+                            mb_lit(c, "param ");
+                            mb_show(c, np_p, np_n, tk_up(&nm));
+                            mb_lit(c, " ");
+                            mb_lit(c, kw);
+                            mb_lit(c, ": channel must be 1..16");
+                            return pp_raise(p);
+                        }
+                        if (!(1 <= ch && ch <= 16)) {
+                            mb_begin(c);
+                            mb_lit(c, "param ");
+                            mb_show(c, np_p, np_n, tk_up(&nm));
+                            mb_lit(c, " ");
+                            mb_lit(c, kw);
+                            mb_lit(c, ": channel must be 1..16 (got ");
+                            mb_dec(c, ch);
+                            mb_lit(c, ")");
+                            return pp_raise(p);
+                        }
+                        src_ch = (uint8_t)ch;
+                        if (src_kind == 1) {
+                            if (!pp_peek(p, 0)) {
+                                mb_begin(c);
+                                mb_lit(c, "param ");
+                                mb_show(c, np_p, np_n, tk_up(&nm));
+                                mb_lit(c, " cc: cc number is missing");
+                                return pp_raise(p);
+                            }
+                            pp_next(p, &ct);
+                            if (pp_find_param(p, tk_ptr(p, &ct), tk_len(&ct), tk_up(&ct))) {
+                                mb_begin(c);
+                                mb_lit(c, "param ");
+                                mb_show(c, np_p, np_n, tk_up(&nm));
+                                mb_lit(c, " cc: cc number cannot be a param (dynamic param not supported)");
+                                return pp_raise(p);
+                            }
+                            if (!pp_int_const(p, &ct, &num)) {
+                                mb_begin(c);
+                                mb_lit(c, "param ");
+                                mb_show(c, np_p, np_n, tk_up(&nm));
+                                mb_lit(c, " cc: cc number must be 0..127");
+                                return pp_raise(p);
+                            }
+                            if (!(0 <= num && num <= 127)) {
+                                mb_begin(c);
+                                mb_lit(c, "param ");
+                                mb_show(c, np_p, np_n, tk_up(&nm));
+                                mb_lit(c, " cc: cc number must be 0..127 (got ");
+                                mb_dec(c, num);
+                                mb_lit(c, ")");
+                                return pp_raise(p);
+                            }
+                            src_num = (uint8_t)num;
+                        }
+                    }
+                }
             }
 
             if (f->nparams >= OTC_L_MAX_PARAMS) {
@@ -1413,6 +1814,9 @@ CC_NOINLINE static uint32_t pp_decl(pp_t *p)
             PTR(c, otc_param_t, prm)->lo = vals[1];
             PTR(c, otc_param_t, prm)->hi = vals[2];
             PTR(c, otc_param_t, prm)->kind = pkind;
+            PTR(c, otc_param_t, prm)->src_kind = src_kind;
+            PTR(c, otc_param_t, prm)->src_ch = src_ch;
+            PTR(c, otc_param_t, prm)->src_num = src_num;
             PTR(c, otc_param_t, prm)->path = (pkind == OTC_PK_FOLDER) ? folder_path : 0;
             PTR(c, otc_param_t, prm)->nlabels = (pkind == OTC_PK_OPTION) ? (uint8_t)nlabels : 0;
             if (pkind == OTC_PK_OPTION) {
@@ -1430,18 +1834,24 @@ CC_NOINLINE static uint32_t pp_decl(pp_t *p)
             ND(c, decl)->val = nref;
         }
     } else if (tk_word_eq(p, &t, "CONFIRM")) {
+        otc_live_t *lv = pp_live(c, f);                /* (the live record also keeps the declaration's line) */
+        if (!lv) {
+            p->err = 1;
+            return 0;
+        }
+        lv->confirm_decl_line = p->line_no;
         if (pp_peek(p, 0)) {
             pp_next(p, &s);
             if (s.kind != T_STR)
                 return pp_raise_lit(p, "confirm takes an optional string: confirm \"TEXT\"");
-            if (tk_len(&s) && !f->confirm_line) {           /* the first non-empty text is the box's question (spec 14.1) */
+            if (tk_len(&s) && !f->confirm_text) {           /* the first non-empty text is the box's question (spec 14.1) */
                 uint32_t ref = cc_str(c, tk_ptr(p, &s), tk_len(&s), 0);
                 if (!ref) {
                     p->err = 1;
                     return 0;
                 }
                 f = FN(c, p->fn);
-                f->confirm_line = p->line_no;
+                f->confirm_line = p->line_no;          /* the text's line (the dump shows it) */
                 f->confirm_text = ref;
             }
             if (tk_len(&s) > 28u) {
@@ -1469,6 +1879,251 @@ CC_NOINLINE static uint32_t pp_decl(pp_t *p)
         }
     }
     return decl;
+}
+
+/* parse_in_block(): `in clock N:`, `in note [ch]:`, `in cc ch n:`.  Returns 1 + the index of the block
+ * (the value of otc_line_t.ib), or 0 (the ParseError is in p->errmsg). */
+CC_NOINLINE static uint32_t pp_in_block(pp_t *p, int opens)
+{
+    otc_comp_t *c = p->c;
+    otc_func_t *f = FN(c, p->fn);
+    otc_live_t *lv;
+    tok_t t, k, v;
+    uint32_t q, ib, line = p->line_no;
+    int32_t ticks = 0, ch = -1, num = 0;
+    uint8_t kind = 0;
+    uint32_t gate_name = 0, gate_namelen = 0;
+    if (!pp_next(p, &t))
+        return 0;
+    if (!pp_peek(p, 0))
+        return pp_raise_lit(p, "in expects an input specifier (in clock N:, in note [ch]:, in cc ch n:, in trig t [all]:)");
+    pp_next(p, &k);
+    if (tk_word_eq(p, &k, "CLOCK")) {
+        if (!pp_peek(p, 0) || tk_is_sym(p, pp_peek(p, 0), ':'))
+            return pp_raise_lit(p, "in clock expects a number of ticks: in clock N:");
+        pp_next(p, &v);
+        if (!pp_int_const(p, &v, &ticks))
+            return pp_raise_lit(p, "in clock N: N must be a number or an integer const");
+        if (ticks < 1) {
+            mb_begin(c);
+            mb_lit(c, "in clock N: N must be >= 1 (got ");
+            mb_dec(c, ticks);
+            mb_lit(c, ")");
+            return pp_raise(p);
+        }
+        kind = OTC_IK_CLOCK;
+    } else if (tk_word_eq(p, &k, "NOTE")) {
+        if (pp_peek(p, 0) && !tk_is_sym(p, pp_peek(p, 0), ':')) {
+            pp_next(p, &v);
+            if (!pp_int_const(p, &v, &ch))
+                return pp_raise_lit(p, "in note: channel must be 1..16 or an integer const");
+            if (!(1 <= ch && ch <= 16)) {
+                mb_begin(c);
+                mb_lit(c, "in note: channel must be 1..16 (got ");
+                mb_dec(c, ch);
+                mb_lit(c, ")");
+                return pp_raise(p);
+            }
+        }
+        kind = OTC_IK_NOTE;
+    } else if (tk_word_eq(p, &k, "CC")) {
+        if (!pp_peek(p, 0) || tk_is_sym(p, pp_peek(p, 0), ':'))
+            return pp_raise_lit(p, "in cc expects channel and cc number: in cc ch n:");
+        pp_next(p, &v);
+        if (!pp_int_const(p, &v, &ch))
+            return pp_raise_lit(p, "in cc: channel must be 1..16 or an integer const");
+        if (!(1 <= ch && ch <= 16)) {
+            mb_begin(c);
+            mb_lit(c, "in cc: channel must be 1..16 (got ");
+            mb_dec(c, ch);
+            mb_lit(c, ")");
+            return pp_raise(p);
+        }
+        if (!pp_peek(p, 0) || tk_is_sym(p, pp_peek(p, 0), ':'))
+            return pp_raise_lit(p, "in cc ch n: cc number is missing");
+        pp_next(p, &v);
+        if (!pp_int_const(p, &v, &num))
+            return pp_raise_lit(p, "in cc: cc number must be 0..127 or an integer const");
+        if (!(0 <= num && num <= 127)) {
+            mb_begin(c);
+            mb_lit(c, "in cc: cc number must be 0..127 (got ");
+            mb_dec(c, num);
+            mb_lit(c, ")");
+            return pp_raise(p);
+        }
+        kind = OTC_IK_CC;
+    } else if (tk_word_eq(p, &k, "TRIG")) {
+        int32_t t;
+        uint32_t genre = 0;
+        if (!pp_peek(p, 0) || tk_is_sym(p, pp_peek(p, 0), ':'))
+            return pp_raise_lit(p, "in trig expects a track: in trig t [all]:");
+        pp_next(p, &v);
+        if (!pp_int_const(p, &v, &t))
+            return pp_raise_lit(p, "in trig: track must be 1..8 or an integer const");
+        if (!(1 <= t && t <= 8)) {
+            mb_begin(c);
+            mb_lit(c, "in trig: track must be 1..8 (got ");
+            mb_dec(c, t);
+            mb_lit(c, ")");
+            return pp_raise(p);
+        }
+        if (pp_peek(p, 0) && tk_word_eq(p, pp_peek(p, 0), "ALL")) {
+            pp_adv(p);
+            genre = 1;
+        } else if (pp_peek(p, 0) && tk_word_eq(p, pp_peek(p, 0), "SCRIPT")) {
+            /* 1.1 leaves the script trigs out; the same literal as tools/otype.py's IN_TRIG_SCRIPT_REFUSED */
+            return pp_raise_lit(p, "in trig t script: is not available in 1.1: use in trig t: or in trig t all:");
+        }
+        ch = t;
+        num = (int32_t)genre;
+        kind = OTC_IK_TRIG;
+    } else if (tk_word_eq(p, &k, "GATE")) {
+        tok_t nm;
+        int32_t n;
+        int np;
+        if (!pp_peek(p, 0) || tk_is_sym(p, pp_peek(p, 0), ':'))
+            return pp_raise_lit(p, "in gate expects a script name and an output: in gate NAME n:");
+        pp_next(p, &v);
+        if (v.kind != T_WORD) {
+            mb_begin(c);
+            mb_lit(c, "in gate: expected a function name, got ");
+            mb_tokshow(p, &v);
+            return pp_raise(p);
+        }
+        tk_set(&nm, &v);
+        np = cc_name_problem(tk_ptr(p, &nm), tk_len(&nm), 1, 1);
+        if (np) {
+            mb_begin(c);
+            mb_lit(c, "in gate: ");
+            cc_np_text(c, np, tk_ptr(p, &nm), tk_len(&nm), 1);
+            return pp_raise(p);
+        }
+        if (tk_len(&nm) > 8u) {
+            mb_begin(c);
+            mb_lit(c, "in gate: name is too long (");
+            mb_dec(c, (int32_t)tk_len(&nm));
+            mb_lit(c, " > 8 characters)");
+            return pp_raise(p);
+        }
+        gate_name = pp_text(p, &nm);
+        if (p->err)
+            return 0;
+        gate_namelen = tk_len(&nm);
+        if (!pp_peek(p, 0) || tk_is_sym(p, pp_peek(p, 0), ':'))
+            return pp_raise_lit(p, "in gate: output must be 1..4 or an integer const");
+        pp_next(p, &v);
+        if (!pp_int_const(p, &v, &n))
+            return pp_raise_lit(p, "in gate: output must be 1..4 or an integer const");
+        if (!(1 <= n && n <= 4)) {
+            mb_begin(c);
+            mb_lit(c, "in gate: output must be 1..4 (got ");
+            mb_dec(c, n);
+            mb_lit(c, ")");
+            return pp_raise(p);
+        }
+        kind = OTC_IK_GATE;
+        ch = n;
+    } else {
+        mb_begin(c);
+        mb_lit(c, "unknown input kind ");
+        mb_show(c, tk_ptr(p, &k), tk_len(&k), 1);
+        mb_lit(c, ": use in clock n, in note [ch], in cc ch n, in trig t [all]");
+        return pp_raise(p);
+    }
+    if (pp_peek(p, 0) && tk_is_sym(p, pp_peek(p, 0), ':'))
+        pp_adv(p);
+    if (pp_peek(p, 0)) {
+        tok_t lt;
+        tk_set(&lt, pp_peek(p, 0));
+        mb_begin(c);
+        mb_lit(c, "unexpected ");
+        mb_tokshow(p, &lt);
+        mb_lit(c, " after in ");
+        mb_show(c, tk_ptr(p, &k), tk_len(&k), 1);
+        mb_lit(c, " declaration");
+        return pp_raise(p);
+    }
+    if (!opens) {
+        mb_begin(c);
+        mb_lit(c, "in ");
+        mb_show(c, tk_ptr(p, &k), tk_len(&k), 1);
+        mb_lit(c, ": line must end with ':'");
+        return pp_raise(p);
+    }
+    lv = pp_live(c, f);
+    if (!lv) {
+        p->err = 1;
+        return 0;
+    }
+    for (q = lv->ib_first; q; q = PTR(c, otc_in_t, q)->next) {
+        const otc_in_t *b = PTR(c, otc_in_t, q);
+        if (b->kind != kind)
+            continue;
+        if (kind == OTC_IK_CLOCK && b->ticks == (uint32_t)ticks) {
+            mb_begin(c);
+            mb_lit(c, "duplicate in clock ");
+            mb_dec(c, ticks);
+            return pp_raise(p);
+        }
+        if (kind == OTC_IK_NOTE && (int32_t)b->ch == (ch < 0 ? 0 : ch)) {
+            if (ch < 0)
+                return pp_raise_lit(p, "duplicate in note");
+            mb_begin(c);
+            mb_lit(c, "duplicate in note ");
+            mb_dec(c, ch);
+            return pp_raise(p);
+        }
+        if (kind == OTC_IK_CC && (int32_t)b->ch == ch && (int32_t)b->num == num) {
+            mb_begin(c);
+            mb_lit(c, "duplicate in cc ");
+            mb_dec(c, ch);
+            mb_byte(c, ' ');
+            mb_dec(c, num);
+            return pp_raise(p);
+        }
+        if (kind == OTC_IK_TRIG && (int32_t)b->ch == ch && (int32_t)b->num == num) {
+            mb_begin(c);
+            mb_lit(c, "duplicate in trig ");
+            mb_dec(c, ch);
+            if (num == 1)
+                mb_lit(c, " all");
+            return pp_raise(p);
+        }
+        if (kind == OTC_IK_GATE && b->name == gate_name && (int32_t)b->ch == ch) {
+            mb_begin(c);
+            mb_lit(c, "duplicate in gate ");
+            mb_show_ref(c, gate_name);
+            mb_byte(c, ' ');
+            mb_dec(c, ch);
+            return pp_raise(p);
+        }
+    }
+    ib = cc_alloc(c, (uint32_t)sizeof(otc_in_t));
+    if (!ib) {
+        p->err = 1;
+        return 0;
+    }
+    f = FN(c, p->fn);
+    PTR(c, otc_in_t, ib)->next = 0;
+    PTR(c, otc_in_t, ib)->line = line;
+    PTR(c, otc_in_t, ib)->kind = kind;
+    PTR(c, otc_in_t, ib)->ticks = (uint32_t)ticks;
+    PTR(c, otc_in_t, ib)->ch = (uint32_t)(ch < 0 ? 0 : ch);
+    PTR(c, otc_in_t, ib)->num = (uint32_t)num;
+    PTR(c, otc_in_t, ib)->name = gate_name;
+    PTR(c, otc_in_t, ib)->namelen = gate_namelen;
+    if (lv->ib_last)
+        PTR(c, otc_in_t, lv->ib_last)->next = ib;
+    else
+        lv->ib_first = ib;
+    lv->ib_last = ib;
+    lv->nib++;
+    if (kind == OTC_IK_CLOCK && !f->clock_line) {
+        f->clock_line = line;
+        f->clock_ticks = (uint32_t)ticks;
+    }
+    f->module_line = line;                 /* a live script: hosts & MODULE, the name is the function's */
+    return lv->nib;
 }
 
 /* ---- lines ---------------------------------------------------------------------------------------------- */
@@ -1510,6 +2165,16 @@ CC_NOINLINE static uint32_t pp_line(otc_comp_t *c, uint32_t fn, const li_t *li, 
     for (first = 1;; first = 0) {
         const tok_t *t = pp_peek(&p, 0);
         uint32_t s, m;
+        if (first && t->kind == T_WORD && tk_word_eq(&p, t, "IN")) {
+            s = pp_in_block(&p, li->opens);
+            if (s) {
+                l = LN(c, ln);
+                l->ib = (uint16_t)s;
+                l->flags |= OTC_LF_OPENS;
+                return ln;
+            }
+            break;
+        }
         if (first && t->kind == T_WORD && cc_in_set(OTC_SET_DECLS, p.body + t->a, t->b - t->a, 1)) {
             s = pp_decl(&p);
             if (s) {
@@ -1674,6 +2339,8 @@ CC_NOINLINE static void cc_parse_func(otc_comp_t *c, uint32_t fn)
     int seen_stmt = 0, blind = 0;
     c->stk_ind[0] = 0xFFFFFFFFu;
     c->stk_own[0] = 0;                                      /* owner 0 = the root of the function */
+    c->stk_ib[0] = 0;
+    c->cur_ib = 0;
     cc_lines_init(&ls, text, FN(c, fn)->body_end, FN(c, fn)->body_off, FN(c, fn)->body_line);
     while (cc_lines_next(&ls)) {
         uint32_t own, prev, first_kind, lastp;
@@ -1689,9 +2356,8 @@ CC_NOINLINE static void cc_parse_func(otc_comp_t *c, uint32_t fn)
             blind = 1;
         else if (FN(c, fn)->nargs)
             pp_mark_words(c, fn, &li);
-        ln = pp_line(c, fn, &li, no);
-        if (!ln)
-            return;
+        /* Python checks the pending block and the indentation BEFORE parse_line: the diagnostics of this
+         * line come after the empty-block / indentation ones (emission order is compared byte for byte). */
         if (pending) {
             if (li.indent > LN(c, pending)->indent) {
                 if (sp >= OTC_BLOCK_STACK) {
@@ -1700,6 +2366,7 @@ CC_NOINLINE static void cc_parse_func(otc_comp_t *c, uint32_t fn)
                 }
                 c->stk_ind[sp] = li.indent;
                 c->stk_own[sp] = pending;
+                c->stk_ib[sp] = LN(c, pending)->ib ? LN(c, pending)->ib : c->stk_ib[sp - 1];
                 sp++;
                 if (sp - 1u > OTC_L_MAX_NEST) {
                     mb_begin(c);
@@ -1728,6 +2395,15 @@ CC_NOINLINE static void cc_parse_func(otc_comp_t *c, uint32_t fn)
                 cc_err_lit(c, fn, no, "indentation does not match the function body");
         }
         own = c->stk_own[sp - 1];
+        c->cur_ib = c->stk_ib[sp - 1];
+        ln = pp_line(c, fn, &li, no);
+        if (!ln)
+            return;
+        if (LN(c, ln)->ib && sp > 1u) {
+            mb_begin(c);
+            mb_lit(c, "in block must be at the root of the function");
+            cc_func_err(c, fn, no, mb_end(c), 0);
+        }
         lastp = own ? LN(c, own)->child_last : FN(c, fn)->root_last;
         prev = lastp;
         first_kind = (uint32_t)cc_first_kind(c, LN(c, ln));
@@ -1766,25 +2442,45 @@ CC_NOINLINE static void cc_parse_func(otc_comp_t *c, uint32_t fn)
     if (blind)
         FN(c, fn)->flags |= OTC_FF_BLIND;
     /* declarations before the first statement */
-    for (ln = FN(c, fn)->root_first; ln; ln = LN(c, ln)->next) {
+    for (ln = FN(c, fn)->root_first; ln; ln = LN(c, ln)->next) {   /* declarations before the first statement */
         const otc_line_t *l = LN(c, ln);
         if ((l->flags & OTC_LF_DECL) ||
             ((l->flags & OTC_LF_ERROR) && cc_ref_in_set(c, OTC_SET_DECLS, l->first_word))) {
             if (seen_stmt)
                 cc_err_decl(c, fn, l, "declaration ", " after the first statement");
+        } else if (l->ib) {
+            int seen_sub_stmt = 0;
+            uint32_t sub;
+            seen_stmt = 1;
+            for (sub = l->child_first; sub; sub = LN(c, sub)->next) {
+                const otc_line_t *sl = LN(c, sub);
+                if (sl->flags & OTC_LF_DECL) {
+                    if (!cc_ref_ci_eq(c, ND(c, sl->body)->text, "VAR"))
+                        cc_err_decl(c, fn, sl, "declaration ", " inside a block");
+                    else if (seen_sub_stmt)
+                        cc_err_decl(c, fn, sl, "declaration ", " after the first statement");
+                } else if (sl->body || sl->mods) {
+                    seen_sub_stmt = 1;
+                }
+            }
         } else {
             seen_stmt = 1;
+            if (FN(c, fn)->module_label && PTR(c, otc_live_t, FN(c, fn)->module_label)->nib)
+                cc_err_lit(c, fn, l->no, "statement outside any in block (a live script organizes its code in 'in' blocks)");
         }
     }
     for (ln = FN(c, fn)->root_first; ln; ln = LN(c, ln)->next) {   /* declarations inside a block */
-        uint32_t sub = cc_sub_next(c, ln, ln);
+        uint32_t sub;
+        if (LN(c, ln)->ib)
+            continue;
+        sub = cc_sub_next(c, ln, ln);
         while (sub) {
             if (LN(c, sub)->flags & OTC_LF_DECL)
                 cc_err_decl(c, fn, LN(c, sub), "declaration ", " inside a block");
             sub = cc_sub_next(c, sub, ln);
         }
     }
-    if (FN(c, fn)->nparams && !FN(c, fn)->nmenus && !FN(c, fn)->page_line) {
+    if (FN(c, fn)->nparams && !FN(c, fn)->nmenus && !FN(c, fn)->page_line && !FN(c, fn)->module_line) {
         for (ln = FN(c, fn)->root_first; ln; ln = cc_preorder_next(c, ln)) {
             const otc_line_t *l = LN(c, ln);
             if ((l->flags & OTC_LF_DECL) && cc_ref_ci_eq(c, ND(c, l->body)->text, "PARAM"))
@@ -1811,11 +2507,36 @@ CC_NOINLINE static void cc_parse_func(otc_comp_t *c, uint32_t fn)
             }
         }
     }
+    if (FN(c, fn)->module_label && PTR(c, otc_live_t, FN(c, fn)->module_label)->launch_line &&
+        !PTR(c, otc_live_t, FN(c, fn)->module_label)->nib)
+        cc_err_lit(c, fn, PTR(c, otc_live_t, FN(c, fn)->module_label)->launch_line, "launch is only allowed in a live script");
+    if (FN(c, fn)->module_label && PTR(c, otc_live_t, FN(c, fn)->module_label)->nib) {   /* the rules of a live script */
+        uint32_t nlen;
+        (void)cc_sp(c, FN(c, fn)->name, &nlen);
+        if (nlen > OTC_L_MODULE_LABEL_MAX) {
+            mb_begin(c);
+            mb_lit(c, "live script name ");
+            mb_show_ref(c, FN(c, fn)->name);
+            mb_lit(c, " is longer than ");
+            mb_dec(c, OTC_L_MODULE_LABEL_MAX);
+            mb_lit(c, " characters");
+            cc_func_err(c, fn, FN(c, fn)->line, mb_end(c), 0);
+        }
+        if (FN(c, fn)->page_line)
+            cc_err_lit(c, fn, FN(c, fn)->page_line, "a live script cannot declare a page");
+        if (FN(c, fn)->nargs)
+            cc_err_lit(c, fn, FN(c, fn)->line, "a live script takes no arguments");
+        if (FN(c, fn)->flags & OTC_FF_CONFIRM) {
+            uint32_t cline = (FN(c, fn)->module_label && PTR(c, otc_live_t, FN(c, fn)->module_label)->confirm_decl_line)
+                              ? PTR(c, otc_live_t, FN(c, fn)->module_label)->confirm_decl_line : FN(c, fn)->line;
+            cc_err_lit(c, fn, cline, "confirm not allowed in a live script");
+        }
+    }
     {
         int any = 0;
         for (ln = FN(c, fn)->root_first; ln && !any; ln = cc_preorder_next(c, ln)) {
             const otc_line_t *l = LN(c, ln);
-            if (!(l->flags & OTC_LF_DECL) && !cc_ref_in_set(c, OTC_SET_DECLS, l->first_word))
+            if (!(l->flags & OTC_LF_DECL) && !l->ib && !cc_ref_in_set(c, OTC_SET_DECLS, l->first_word))
                 any = 1;
         }
         if (!any)

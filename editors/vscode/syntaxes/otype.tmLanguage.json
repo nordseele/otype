@@ -129,11 +129,11 @@
     },
     "declaration": {
       "name": "keyword.declaration.otype",
-      "match": "(?i)(?<![\\w.])(?:DEF|CONST|MENU|PAGE|ON|PARAM|CONFIRM|OTYPE|INPUT|SAMPLE)(?![\\w.])"
+      "match": "(?i)(?<![\\w.])(?:DEF|CONST|MENU|PAGE|MODULE|CLOCK|LAUNCH|ON|PARAM|CONFIRM|OTYPE|INPUT|SAMPLE|VAR)(?![\\w.])"
     },
     "control": {
       "name": "keyword.control.otype",
-      "match": "(?i)(?<![\\w.])(?:IF|ELIF|ELSE|L|EACH|PROB|EVERY|SKIP|DEL|BREAK|STOP|RET)(?![\\w.])"
+      "match": "(?i)(?<![\\w.])(?:IF|ELIF|ELSE|L|EACH|PROB|EVERY|SKIP|DEL|BREAK|STOP|RET|IN)(?![\\w.])"
     },
     "context": {
       "name": "keyword.other.context.otype",
@@ -153,7 +153,7 @@
     },
     "builtin": {
       "name": "support.function.builtin.otype",
-      "match": "(?i)(?<![\\w.])(?:ADD|SUB|MUL|DIV|MOD|MIN|MAX|ABS|NEG|NOT|LIM|WRAP|EQ|NE|LT|GT|LE|GE|AND|OR|XOR|EZ|NZ|RND|RRAND|TOSS|CHANCE|PICK|AT|LEN|OFF|ER|DIR|EXT|MATCH|MSG|TEMPO|RATCH|PB|LFO|AMP|FX1|FX2|NORM)(?![\\w.])"
+      "match": "(?i)(?<![\\w.])(?:ADD|SUB|MUL|DIV|MOD|MIN|MAX|ABS|NEG|NOT|LIM|WRAP|EQ|NE|LT|GT|LE|GE|AND|OR|XOR|EZ|NZ|RND|RRAND|TOSS|CHANCE|PICK|AT|LEN|OFF|ER|DIR|EXT|MATCH|MSG|TEMPO|RATCH|PB|LFO|AMP|FX1|FX2|NORM|PLAY)(?![\\w.])"
     },
     "operator": {
       "name": "keyword.operator.otype",

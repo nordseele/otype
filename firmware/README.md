@@ -112,7 +112,20 @@ provides: the take, the Flex slots, the card's WAV and `.ot` files. Their signat
 (`c/audio_default.c`) so that the engine builds without them: no take is ever available and every audio operator
 stops the run with IO ERROR. Your own definitions replace the defaults at link time.
 
-### 5. What the module assumes about the OS
+### 5. The sequencer and module imports
+
+The module operators (`play`, `nx.smp`, `nx.pl`, `seq.run`, `seq.step`, `seq.mute`) call four C functions that the integrating firmware
+provides:
+- `otb_host_module_play(uint32_t track0, const uint8_t *locks32)`: schedules voice playback on track `track0` (0..7) at the module's deadline with the 32 lock bytes `locks32` (`0..29` = parameter locks, `31` = 0-indexed Static sample slot `0..127`, `0xFF` = no lock);
+- `otb_host_seq_run()`: returns 1 if the sequencer transport is currently playing, 0 if stopped;
+- `otb_host_seq_step(uint32_t track0)`: returns the current playing step (1..64) of track `track0` (0..7);
+- `otb_host_seq_mute(uint32_t track0)`: returns 1 if track `track0` (0..7) is muted, 0 if active.
+
+Weak defaults are linked from `c/audio_default.c`: `otb_host_module_play` does nothing, `otb_host_seq_run` returns 0,
+`otb_host_seq_step` returns 1, and `otb_host_seq_mute` returns 0. The integrating firmware provides its own definitions
+at link time.
+
+### 6. What the module assumes about the OS
 
 - **OS 1.40C, unchanged at the addresses the sources name**: the stock routines and globals listed in `src/stock.inc` and
   in the `.equ` block at the top of each `src/*.S`. They are addresses and record layouts only.

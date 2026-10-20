@@ -93,7 +93,8 @@ static void dw_vals(dw_t *w, const otc_comp_t *c, uint32_t ref)       /* a list 
 }
 
 static const char *const dw_kinds[] = {"", "INT", "STEP", "TRACK", "SLOT", "PARAM", "VALUE", "COND", "PCT", "FILE",
-                                       "STR", "LIST", "TRACKS", "STEPSEL", "KW", "OPTKW", "REST", "USER", "ITEM"};
+                                       "STR", "LIST", "TRACKS", "STEPSEL", "KW", "OPTKW", "REST", "USER", "ITEM",
+                                       "CH", "VAL7", "DUR", "VAL14", "NAME", "OUT"};
 
 static void dw_expr(dw_t *w, const otc_comp_t *c, uint32_t n)
 {
@@ -125,11 +126,13 @@ static void dw_expr(dw_t *w, const otc_comp_t *c, uint32_t n)
         dw_ref(w, c, nd->val);
         break;
     case OTC_N_VAR:
+    case OTC_N_VAR_NAMED:
     case OTC_N_ARG:
     case OTC_N_PARAM:
     case OTC_N_CONST:
     case OTC_N_KW:
-        dw_lit(w, nd->kind == OTC_N_VAR ? "var " : nd->kind == OTC_N_ARG ? "arg " :
+        dw_lit(w, nd->kind == OTC_N_VAR ? "var " : nd->kind == OTC_N_VAR_NAMED ? "var_named " :
+                  nd->kind == OTC_N_ARG ? "arg " :
                   nd->kind == OTC_N_PARAM ? "param " : nd->kind == OTC_N_CONST ? "const " : "kw ");
         dw_ref(w, c, nd->text);
         break;
@@ -158,7 +161,8 @@ static void dw_expr(dw_t *w, const otc_comp_t *c, uint32_t n)
         dw_lit(w, &otc_rstr[otc_reg[nd->op].name]);
         break;
     case OTC_N_ASSIGN:
-        dw_lit(w, "assign ");
+    case OTC_N_ASSIGN_VAR_NAMED:
+        dw_lit(w, nd->kind == OTC_N_ASSIGN ? "assign " : "assign_var_named ");
         dw_ref(w, c, nd->text);
         dw_byte(w, ' ');
         dw_expr(w, c, nd->first);
@@ -415,7 +419,21 @@ uint32_t otc_front_dump(const void *ws, char *out, uint32_t cap)
             dw_ref(&w, c, fn->page_label);
             dw_lit(&w, "\"\n");
         }
-        if (fn->confirm_line) {
+        if (fn->module_line) {
+            dw_lit(&w, "module ");
+            dw_dec(&w, (int32_t)fn->module_line);
+            dw_lit(&w, " \"");
+            dw_ref(&w, c, fn->name);
+            dw_lit(&w, "\"\n");
+        }
+        if (fn->clock_line) {
+            dw_lit(&w, "clock ");
+            dw_dec(&w, (int32_t)fn->clock_line);
+            dw_byte(&w, ' ');
+            dw_dec(&w, (int32_t)fn->clock_ticks);
+            dw_byte(&w, '\n');
+        }
+        if (fn->confirm_text) {
             dw_lit(&w, "confirm ");
             dw_dec(&w, (int32_t)fn->confirm_line);
             dw_lit(&w, " \"");

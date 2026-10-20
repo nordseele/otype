@@ -45,8 +45,8 @@ loaded (seen on VS Code 1.140). Build a `.vsix` (a zip, no npm needed) and
 install it:
 
 ```sh
-python3 editors/vscode/package_vsix.py      # -> editors/vscode/otype-0.1.0.vsix
-code --install-extension editors/vscode/otype-0.1.0.vsix --force
+python3 editors/vscode/package_vsix.py      # -> editors/vscode/otype-0.2.0.vsix
+code --install-extension editors/vscode/otype-0.2.0.vsix --force
 ```
 
 (`code` is `/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code`
@@ -89,8 +89,8 @@ from the bundled copy, are `node editors/vscode/test/sighelp.test.js`.
 "Extensions: Install from VSIX…", or from a terminal:
 
 ```sh
-cd editors/vscode && python3 package_vsix.py       # produces otype-0.1.0.vsix
-code --install-extension otype-0.1.0.vsix
+cd editors/vscode && python3 package_vsix.py       # produces otype-0.2.0.vsix
+code --install-extension otype-0.2.0.vsix
 ```
 
 ## Not verified without VS Code running

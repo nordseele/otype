@@ -47,6 +47,14 @@ We tried to cover everything you can edit on the Octatrack:
 
 The full list, by category, is the [command reference](https://nordseele.github.io/otype-docs/).
 
+## Coming in 1.2
+
+Not in this version yet:
+
+- scripts that start by themselves when a project loads (`auto`, `in load:`, the project's own `SCRIPTS` folder);
+- trigs sent by another firmware (`in trig t script:`);
+- the audio operators as an optional package, OType audio.
+
 ## The syntax
 
 OType is inspired by Monome Teletype: one command per line, prefix notation, modifiers before `:`, blocks by

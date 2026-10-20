@@ -50,7 +50,8 @@ SUPPORTED_RULE = ("level == 'vm', plus TRK.CUR and PAT.LEN, plus the trig / samp
 E1B_EXTRA = frozenset(("TRK.CUR", "PAT.LEN"))
 # the trig / sample-lock operations, run on the pattern's bytes bound with otc_vm_bind
 E2B_EXTRA = frozenset(("TR.ADD", "TR.DEL", "TR.FLIP", "TR.CLR", "HAS.TRIG", "HAS.LOCK", "HAS.SMP",
-                       "IS.EMPTY", "TRK.TYPE", "SMP.SET", "SMP.GET", "SMP.DEL", "SMP.RND", "SMP.CLR"))
+                       "IS.EMPTY", "TRK.TYPE", "SMP.SET", "SMP.GET", "SMP.DEL", "SMP.RND", "SMP.CLR",
+                       "RT.ADD", "RT.DEL", "RT.CLR", "RT.SRC", "RO.ADD", "RO.DEL"))
 
 # the p-lock and trigless-lock operations, run on the same bound blocks; the PL.* ops also read the part's
 # descriptor and value through the two otb_host_param_* imports
@@ -58,13 +59,16 @@ M3A_EXTRA = frozenset(("PL.SET", "PL.GET", "PL.DEL", "PL.RND", "PL.VARY", "PL.CL
 
 # the part operations, through the part imports (otb_host_par_set ...).
 M3B_EXTRA = frozenset(("PAR.SET", "LFO.DEST", "FX.TYPE", "SCN.CLR", "TRK.INIT",
-                       "TRK.SLOT", "TEMPO"))
+                       "TRK.SLOT", "TEMPO", "REC.SRC", "REC.LEN", "REC.TRIG", "REC.LOOP", "REC.ARM", "PAT.COPY"))
 
 # the trig-word operations (condition, micro-timing, count), run on the bound blocks like the trig / sample-lock ops
 M3C_EXTRA = frozenset(("COND.SET", "COND.RND", "MICRO.SET", "MICRO.RND", "RATCH.SET"))
 
 V1_EXTRA = O._V1_OPS | frozenset(("MSG",))      # msg: the run keeps the text of its last msg (OTC_MSG_MAX characters)
 AUDIO_EXTRA = frozenset(("SRC.SAVE", "FLEX.LOAD", "FLEX.FREE", "FLEX.FIRSTFREE", "FLEX.DEL", "CAT.CLR", "CAT.ADD", "CAT.SAVE", "NORM"))
+MODULE_EXTRA = frozenset(("PLAY", "SEQ.RUN", "SEQ.STEP", "SEQ.MUTE", "NX.SMP", "NX.PL",
+                          "SEND.NOTE", "SEND.CC", "SEND.PROG", "SEND.NRPN",
+                          "MIDI.CC", "MIDI.NOTE", "MIDI.VEL", "GATE", "OUT", "CV"))
 
 # the card / slot operations (dir ext match file.* static.* slots.*), run on the workspace
 # bound with otc_vm_bind_work (without it they stop the run with OTC_E_UNSUPPORTED, as without a workspace)
@@ -74,7 +78,8 @@ AK = {"none": 0, "pct": 1, "range": 2, "cond": 3, "list": 4, "str": 5}
 
 def supported(op):
     return (op.level == "vm" or op.name in E1B_EXTRA or op.name in E2B_EXTRA or op.name in M3A_EXTRA
-            or op.name in M3B_EXTRA or op.name in M3C_EXTRA or op.name in V1_EXTRA or op.name in AUDIO_EXTRA or card(op))
+            or op.name in M3B_EXTRA or op.name in M3C_EXTRA or op.name in V1_EXTRA or op.name in AUDIO_EXTRA
+            or op.name in MODULE_EXTRA or card(op))
 
 
 def card(op):
@@ -99,7 +104,7 @@ def arg_kind(k):
         return AK["range"], O.RANGES[k][0], O.RANGES[k][1]
     if k == O.LIST:
         return AK["list"], 0, 0
-    if k == O.STR:
+    if k == O.STR or k == O.NAME:
         return AK["str"], 0, 0
     return AK["none"], 0, 0
 
@@ -182,7 +187,8 @@ def render():
 # Argument kind codes.  The same codes name the kind of an argument in the parse tree (node.akind): `otc_kindname`
 # gives the text the Python tree holds in Node.kinds ("INT" ... "KW", "USER").
 KIND_CODES = ("INT", "STEP", "TRACK", "SLOT", "PARAM", "VALUE", "COND", "PCT", "FILE", "STR", "LIST",
-              "TRACKS", "STEPSEL", "KW", "OPTKW", "REST", "USER", "ITEM")      # codes 1..18 (0 = none)
+              "TRACKS", "STEPSEL", "KW", "OPTKW", "REST", "USER", "ITEM",
+              "CH", "VAL7", "DUR", "VAL14", "NAME", "OUT")      # codes 1..24 (0 = none)
 FAMILIES = (O.LANG, O.CTX, O.EDIT, O.IO_R, O.IO_W, O.UI, O.STATE)
 TOUCHES = (O.TRAC, O.PART, O.SLOTS, O.NONE)
 FLAGS = (("RET", lambda o: o.ret is not None), ("CTX", lambda o: o.family == O.CTX),
@@ -194,7 +200,7 @@ LANG_SETS = (("KEYWORDS", "keywords"), ("VARS", "variables"), ("ASSIGNABLE", "as
              ("FUTURE_HOSTS", "hosts of `on` that do not exist yet"))
 SPECIAL_OPS = ("TRK", "STEPS", "DIR", "EXT", "MATCH", "MSG")      # ops with a code shape of their own
 LANG_NUMS = ("MAX_LINE", "MAX_STR", "MAX_LIST", "MAX_ARGS", "MAX_PARAMS", "MAX_DEPTH", "MAX_NEST", "MAX_FUNCS",
-             "LEVEL_MAX", "ACTION_MAX", "NAME_MAX", "MAX_FILES", "MAX_SOURCE_BYTES", "MENU_BUDGET", "EACH_ITERS", "PAGE_LABEL_MAX", "PAGE_MAX_PARAMS", "MAX_MSG", "MAX_MSG_ITEMS")
+             "LEVEL_MAX", "ACTION_MAX", "NAME_MAX", "MAX_FILES", "MAX_SOURCE_BYTES", "MENU_BUDGET", "MODULE_BUDGET", "EACH_ITERS", "PAGE_LABEL_MAX", "PAGE_MAX_PARAMS", "MODULE_LABEL_MAX", "MAX_MSG", "MAX_MSG_ITEMS")
 
 
 class _Blob:
@@ -335,6 +341,18 @@ def render_reg():
     L.append("static const otc_reg_t otc_reg[OTC_NREG] = {")
     L.extend(rows)
     L.append("};")
+    L.append("")
+    menu_only = [i for i, o in enumerate(ops) if getattr(o, "menu_only", False)]
+    L.append("/* the optional integer arguments whose default is not 0 (Op.OPT_INT): op index, argument index, value */")
+    adefs = ["{%d, %d, %d}" % (i, j, k.default)
+             for i, o in enumerate(ops) for j, k in enumerate(o.args)
+             if isinstance(k, O.OPT_INT) and k.default]
+    L.append("#define OTC_NARGDEF %d" % len(adefs))
+    L.append("static const struct { uint8_t op, arg; int16_t value; } otc_argdef[%d] = {%s};" % (max(len(adefs), 1), ", ".join(adefs) or "{0, 0, 0}"))
+    L.append("")
+    L.append("/* ops a live script may not run (Op.menu_only), indexes in otc_reg */")
+    L.append("#define OTC_NMENU_ONLY %d" % len(menu_only))
+    L.append("static const uint16_t otc_menu_only[%d] = {%s};" % (max(len(menu_only), 1), ", ".join(map(str, menu_only)) or "0"))
     L.append("")
     L.append("typedef struct { uint16_t off; uint8_t op; uint8_t pad; } otc_opname_t;")
     L.append("/* every name and alias, sorted by its bytes */")

@@ -27,7 +27,7 @@
 enum {                          /* the instruction set (otb.INSTRS) */
     OI_PUSH8 = 0x10, OI_PUSH16 = 0x11, OI_PUSHK = 0x12, OI_PUSHC = 0x13, OI_LD = 0x14, OI_LDA = 0x15, OI_LDP = 0x16,
     OI_ST = 0x17, OI_DROP = 0x18, OI_OP = 0x30, OI_OPV = 0x31, OI_SET = 0x32, OI_JMP = 0x40, OI_JZ = 0x41, OI_SEL = 0x42,
-    OI_PROB = 0x43, OI_EVERY = 0x44, OI_SKIP = 0x45, OI_LBEG = 0x50, OI_LNEXT = 0x51, OI_EBEG = 0x52, OI_ENEXT = 0x53,
+    OI_PROB = 0x43, OI_EVERY = 0x44, OI_SKIP = 0x45, OI_JNEV = 0x46, OI_JNGT = 0x47, OI_LBEG = 0x50, OI_LNEXT = 0x51, OI_EBEG = 0x52, OI_ENEXT = 0x53,
     OI_PASS = 0x54, OI_PNEXT = 0x55, OI_BREAK = 0x56, OI_CALL = 0x60, OI_RET = 0x61, OI_STOP = 0x62, OI_SCOPE = 0x70,
     OI_UNSCOPE = 0x71, OI_DIR = 0x80, OI_EXT = 0x81, OI_MATCH = 0x82, OI_MSG = 0x83
 };
@@ -265,6 +265,56 @@ static void fc_expr(fc_t *x, uint32_t n);
 static void fc_mods(fc_t *x, uint32_t ln, uint32_t m);
 static void fc_block(fc_t *x, uint32_t first);
 
+static const otc_live_t *gen_live(const otc_comp_t *c, const otc_func_t *f);
+
+/* `jnev end, kind, ch, num` (0x46): the guard of an `in` block, patched to its end label */
+static void fc_jnev(fc_t *x, fc_lb_t *lb, uint32_t kind, uint32_t ch, uint32_t num)
+{
+    uint32_t at = x->pos + 4u;
+    if (x->code) {
+        fc_put(x, x->pos, OI_JNEV);
+        fc_put(x, x->pos + 1u, kind);
+        fc_put(x, x->pos + 2u, ch);
+        fc_put(x, x->pos + 3u, num);
+        fc_put(x, at, (lb->head < 0 ? LB_END : (uint32_t)lb->head) >> 8);
+        fc_put(x, at + 1u, (lb->head < 0 ? LB_END : (uint32_t)lb->head) & 0xFFu);
+        lb->head = (int32_t)at;
+    }
+    x->pos += 6u;
+    fc_stack(x, 0);
+    if (lb->depth == LB_NONE)
+        lb->depth = x->depth;
+}
+
+/* `jngt end, name, n` (0x47): the guard of an `in gate NAME n:` block, name = pool offset */
+static void fc_jngt(fc_t *x, fc_lb_t *lb, uint32_t off, uint32_t out)
+{
+    uint32_t at = x->pos + 4u;
+    if (x->code) {
+        fc_put(x, x->pos, OI_JNGT);
+        fc_put(x, x->pos + 1u, off >> 8);
+        fc_put(x, x->pos + 2u, off & 0xFFu);
+        fc_put(x, x->pos + 3u, out);
+        fc_put(x, at, (lb->head < 0 ? LB_END : (uint32_t)lb->head) >> 8);
+        fc_put(x, at + 1u, (lb->head < 0 ? LB_END : (uint32_t)lb->head) & 0xFFu);
+        lb->head = (int32_t)at;
+    }
+    x->pos += 6u;
+    fc_stack(x, 0);
+    if (lb->depth == LB_NONE)
+        lb->depth = x->depth;
+}
+
+static const otc_in_t *fc_ib(const otc_comp_t *c, uint32_t fn, uint32_t ib)
+{
+    uint32_t q, k = 1;
+    const otc_live_t *lv = gen_live(c, FN(c, fn));
+    for (q = lv ? lv->ib_first : 0; q; q = PTR(c, otc_in_t, q)->next, k++)
+        if (k == ib)
+            return PTR(c, otc_in_t, q);
+    return 0;
+}
+
 static uint32_t fc_str_off(fc_t *x, uint32_t ref)
 {
     return x->pool ? pool_string(x->c, ref) : 0;
@@ -394,6 +444,9 @@ static void fc_expr(fc_t *x, uint32_t n)
     case OTC_N_VAR:
         fc_e1(x, OI_LD, fc_var(x, nd->text), 1);
         break;
+    case OTC_N_VAR_NAMED:                                  /* a `var`: the frame's locals 16..31, by slot */
+        fc_e1(x, OI_LD, 16u + nd->val, 1);
+        break;
     case OTC_N_ARG: {
         uint32_t a = ck_find_arg(c, FN(c, x->fn), nd->text);
         fc_e1(x, OI_LDA, a == 0xFFFFFFFFu ? 0u : a, 1);
@@ -461,6 +514,10 @@ static void fc_stmt(fc_t *x, uint32_t s)
     case OTC_N_ASSIGN:
         fc_expr(x, nd->first);
         fc_e1(x, OI_ST, fc_var(x, nd->text), -1);
+        break;
+    case OTC_N_ASSIGN_VAR_NAMED:
+        fc_expr(x, nd->first);
+        fc_e1(x, OI_ST, 16u + nd->val, -1);
         break;
     case OTC_N_OPSTMT:
         fc_op_node(x, nd->first);
@@ -706,6 +763,26 @@ static void fc_block(fc_t *x, uint32_t first)
             ln = l->next;
             continue;
         }
+        if (l->ib) {                                          /* an `in` block: a guard, then its body (no mark) */
+            const otc_in_t *b = fc_ib(c, x->fn, l->ib);
+            fc_lb_t end;
+            end.depth = LB_NONE;
+            end.head = -1;
+            if (!b) {
+                x->err = 1;
+                return;
+            }
+            if (b->kind == OTC_IK_GATE) {
+                uint32_t noff = x->pool ? pool_string(c, b->name) : 0;   /* no pool before the pool pass */
+                fc_jngt(x, &end, noff, b->ch);
+            }
+            else
+                fc_jnev(x, &end, (uint32_t)b->kind, b->ch, b->num);
+            fc_block(x, l->child_first);
+            fc_place(x, &end);
+            ln = l->next;
+            continue;
+        }
         fc_mark(x, l->no);
         if (fc_is_trk_line(c, l)) {                           /* the rest of the block runs once per track */
             fc_passes_begin(x, ND(c, l->body)->first, PTR(c, fc_pass_t, pend) + np);
@@ -920,11 +997,39 @@ static uint32_t gen_typed_aux_len(otc_comp_t *c, const otc_func_t *f)
     return len;
 }
 
+static const otc_live_t *gen_live(const otc_comp_t *c, const otc_func_t *f)
+{
+    return f->module_label ? PTR(c, otc_live_t, f->module_label) : 0;
+}
+
+static int gen_has_param_src(const otc_comp_t *c, const otc_func_t *f)
+{
+    uint32_t q;
+    for (q = f->param_first; q; q = PTR(c, otc_param_t, q)->next)
+        if (PTR(c, otc_param_t, q)->src_kind)
+            return 1;
+    return 0;
+}
+
+/* the aux bytes of a live script that come after `confirm`: its vars, its param sources, its `launch` ticks */
+static uint32_t gen_live_aux_len(const otc_comp_t *c, const otc_func_t *f)
+{
+    uint32_t len = 0;
+    const otc_live_t *lv = gen_live(c, f);
+    if (lv && lv->nvars)
+        len += 2u + 2u * lv->nvars;
+    if (gen_has_param_src(c, f))
+        len += 4u * f->nparams;
+    if (lv && lv->launch_line)
+        len += 2u;
+    return len;
+}
+
 CC_NOINLINE static void gen_func_pool(otc_comp_t *c, uint32_t i, em_t *em)
 {
     const otc_fx_t *fx = FX(c, i);
     const otc_func_t *f = FNI(c, i);
-    uint32_t q, a, ref, k, l, file_off = 0, menu_off = 0, page_off = 0, conf_off = 0;
+    uint32_t q, a, ref, k, l, file_off = 0, menu_off = 0, page_off = 0, module_off = 0, conf_off = 0;
     uint8_t *ap = em ? em->aux + em->auxr : 0;
     ref = cc_str(c, c->src[f->file].label, c->src[f->file].label_len, 0);
     if (!ref)
@@ -946,6 +1051,8 @@ CC_NOINLINE static void gen_func_pool(otc_comp_t *c, uint32_t i, em_t *em)
 #endif
     if (f->page_line && !(GEN_SAB == 3))                     /* the page label follows the menu list in the pool */
         page_off = pool_string(c, f->page_label);
+    if (f->module_line)
+        module_off = pool_string(c, f->name);
     if (f->confirm_line && !(GEN_SAB == 4))                  /* then the confirm text (spec 14.1) */
         conf_off = pool_string(c, f->confirm_text);
     for (q = f->param_first, k = 0; q; q = PTR(c, otc_param_t, q)->next, k++) {
@@ -972,20 +1079,56 @@ CC_NOINLINE static void gen_func_pool(otc_comp_t *c, uint32_t i, em_t *em)
             wr16(ap + 8u * f->nparams + 2u * a, off);
     }
     if (em) {
+        uint32_t aux_tail = 8u * f->nparams + 2u * f->nargs + 4u * fx->nctr;
         em->file_off = file_off;
         em->menu_off = menu_off;
         fc_compile(c, i, 1, em->code + em->coder, em->lines + 4u * em->liner, fx->nlines,
                    ap + 8u * f->nparams + 2u * f->nargs);
-        if (f->page_line)                                    /* the label's pool offset ends the aux data */
-            wr16(ap + 8u * f->nparams + 2u * f->nargs + 4u * fx->nctr, page_off);
-        if (f->confirm_line)                                 /* then the confirm text's */
-            wr16(ap + 8u * f->nparams + 2u * f->nargs + 4u * fx->nctr + (f->page_line ? 2u : 0u), conf_off);
+        if (f->page_line) {                                  /* the label's pool offset */
+            wr16(ap + aux_tail, page_off);
+            aux_tail += 2u;
+        }
+        if (f->module_line) {                                /* pool offset (2B) + clock ticks (2B) */
+            wr16(ap + aux_tail, module_off);
+            wr16(ap + aux_tail + 2u, f->clock_ticks & 0xFFFFu);
+            aux_tail += 4u;
+        }
+        if (f->confirm_line) {                               /* then the confirm text's */
+            wr16(ap + aux_tail, conf_off);
+            aux_tail += 2u;
+        }
+        if (gen_live(c, f) && gen_live(c, f)->nvars) {        /* a live script's vars: count, then their init values */
+            uint32_t v;
+            const otc_live_t *lv = gen_live(c, f);
+            wr16(ap + aux_tail, lv->nvars);
+            aux_tail += 2u;
+            for (v = lv->var_first; v; v = PTR(c, otc_var_t, v)->next) {
+                wr16(ap + aux_tail, (uint32_t)PTR(c, otc_var_t, v)->init & 0xFFFFu);
+                aux_tail += 2u;
+            }
+        }
+        if (gen_has_param_src(c, f)) {                       /* 4 bytes per param, in declaration order */
+            uint32_t q;
+            for (q = f->param_first; q; q = PTR(c, otc_param_t, q)->next) {
+                const otc_param_t *pa = PTR(c, otc_param_t, q);
+                ap[aux_tail] = pa->src_kind;
+                ap[aux_tail + 1u] = pa->src_ch;
+                ap[aux_tail + 2u] = pa->src_num;
+                ap[aux_tail + 3u] = 0;
+                aux_tail += 4u;
+            }
+        }
+        if (gen_live(c, f) && gen_live(c, f)->launch_line) {  /* `launch N`: its ticks end the aux data */
+            wr16(ap + aux_tail, gen_live(c, f)->launch_ticks & 0xFFFFu);
+            aux_tail += 2u;
+        }
     } else {
         fc_compile(c, i, 1, 0, 0, 0, 0);
     }
     if (gen_has_typed(c, f)) {
         uint32_t aux_base = 8u * f->nparams + 2u * f->nargs + 4u * fx->nctr
-                          + (f->page_line ? 2u : 0u) + (f->confirm_line ? 2u : 0u);
+                          + (f->page_line ? 2u : 0u) + (f->module_line ? 4u : 0u) + (f->confirm_line ? 2u : 0u)
+                          + gen_live_aux_len(c, f);
         uint16_t types_mask = 0;
         for (q = f->param_first, k = 0; q; q = PTR(c, otc_param_t, q)->next, k++) {
             const otc_param_t *pa = PTR(c, otc_param_t, q);
@@ -1172,7 +1315,7 @@ CC_NOINLINE static void gen_diags(otc_comp_t *c)
         if (!fx->inorder || fx->bad)
             continue;
         gen_func_pool(c, i, 0);
-        aux += 8u * f->nparams + 2u * f->nargs + 4u * fx->nctr + (f->page_line ? 2u : 0u) + (f->confirm_line ? 2u : 0u) + gen_typed_aux_len(c, f);
+        aux += 8u * f->nparams + 2u * f->nargs + 4u * fx->nctr + (f->page_line ? 2u : 0u) + (f->module_line ? 4u : 0u) + (f->confirm_line ? 2u : 0u) + gen_live_aux_len(c, f) + gen_typed_aux_len(c, f);
         lines += fx->nlines;
         code += fx->code_len;
     }
@@ -1227,6 +1370,39 @@ static void gen_masks(otc_comp_t *c, uint32_t i)
     }
 }
 
+/* hosts bit GATE: the live script has an `in gate` block (the cascade wakes it) */
+static int gen_gate_host(otc_comp_t *c, const otc_func_t *f)
+{
+    const otc_live_t *lv = f->module_label ? PTR(c, otc_live_t, f->module_label) : 0;
+    uint32_t q;
+    for (q = lv ? lv->ib_first : 0; q; q = PTR(c, otc_in_t, q)->next)
+        if (PTR(c, otc_in_t, q)->kind == OTC_IK_GATE)
+            return 1;
+    return 0;
+}
+
+/* hosts bit CC: the live script has an `in cc ch n` block (the MIDI IN drain wakes it) */
+static int gen_cc_host(otc_comp_t *c, const otc_func_t *f)
+{
+    const otc_live_t *lv = f->module_label ? PTR(c, otc_live_t, f->module_label) : 0;
+    uint32_t q;
+    for (q = lv ? lv->ib_first : 0; q; q = PTR(c, otc_in_t, q)->next)
+        if (PTR(c, otc_in_t, q)->kind == OTC_IK_CC)
+            return 1;
+    return 0;
+}
+
+/* hosts bit TRIG: the live script has an `in trig` block (the UI wakes it on trig events) */
+static uint32_t gen_trig_host(otc_comp_t *c, const otc_func_t *f)
+{
+    const otc_live_t *lv = f->module_label ? PTR(c, otc_live_t, f->module_label) : 0;
+    uint32_t q;
+    for (q = lv ? lv->ib_first : 0; q; q = PTR(c, otc_in_t, q)->next)
+        if (PTR(c, otc_in_t, q)->kind == OTC_IK_TRIG)
+            return 1;
+    return 0;
+}
+
 /* The OTB table (spec 14) of the last run into `out` (at most `cap` bytes; a table is at most 32768 bytes). Returns its
  * length, or 0 when there is none: a failed run, a table-level error (more than 255 functions, a label over 255 bytes,
  * more than 1024 counters, a table over 32768 bytes) or a buffer that is too small. Byte for byte the output of
@@ -1248,7 +1424,7 @@ uint32_t otc_emit(void *ws, uint8_t *out, uint32_t cap)
         if (!fx->inorder || fx->bad)
             continue;
         nok++;
-        aux_len += 8u * f->nparams + 2u * f->nargs + 4u * fx->nctr + (f->page_line ? 2u : 0u) + (f->confirm_line ? 2u : 0u) + gen_typed_aux_len(c, f);
+        aux_len += 8u * f->nparams + 2u * f->nargs + 4u * fx->nctr + (f->page_line ? 2u : 0u) + (f->module_line ? 4u : 0u) + (f->confirm_line ? 2u : 0u) + gen_live_aux_len(c, f) + gen_typed_aux_len(c, f);
         line_len += 4u * fx->nlines;
         code_len += fx->code_len;
     }
@@ -1298,9 +1474,9 @@ uint32_t otc_emit(void *ws, uint8_t *out, uint32_t cap)
         np = cc_sp(c, f->name, &nm);
         for (k = 0; k < nm && k < 16u; k++)
             en[k] = np[k];
-        fl = (fx->destr ? 1u : 0u) | ((f->flags & OTC_FF_CONFIRM) ? 2u : 0u) | (f->confirm_line ? 4u : 0u) | (gen_has_typed(c, f) ? 8u : 0u) | ((f->flags & OTC_FF_INPUT_SAMPLE) ? 16u : 0u);
+        fl = (fx->destr ? 1u : 0u) | ((f->flags & OTC_FF_CONFIRM) ? 2u : 0u) | (f->confirm_line ? 4u : 0u) | (gen_has_typed(c, f) ? 8u : 0u) | ((f->flags & OTC_FF_INPUT_SAMPLE) ? 16u : 0u) | (gen_live(c, f) && gen_live(c, f)->nvars ? 32u : 0u) | (gen_has_param_src(c, f) ? 64u : 0u) | (gen_live(c, f) && gen_live(c, f)->launch_line ? 128u : 0u);
         wr16(en + 16, em.menu_off);
-        wr16(en + 18, (f->nmenus ? 1u : 0u) | (f->page_line ? 0x80u : 0u));   /* hosts: MENU, PAGE */
+        wr16(en + 18, (f->nmenus ? 1u : 0u) | (gen_trig_host(c, f) ? 2u : 0u) | (gen_gate_host(c, f) ? 0x100u : 0u) | (gen_cc_host(c, f) ? 0x200u : 0u) | (f->page_line ? 0x80u : 0u) | (f->module_line ? 0x40u : 0u));   /* hosts: MENU, TRIG, GATE, CC, PAGE, MODULE */
         wr16(en + 20, fx->fam);
         en[22] = (uint8_t)fx->tch;
         en[23] = (uint8_t)fl;
@@ -1313,6 +1489,23 @@ uint32_t otc_emit(void *ws, uint8_t *out, uint32_t cap)
         en[36] = (uint8_t)fx->maxctx;
         en[37] = (uint8_t)fx->maxctl;
         en[38] = (uint8_t)fx->nctr;
+        {
+            uint32_t b, nch = 0, nseen = 0;
+            const otc_live_t *lv = gen_live(c, f);
+            for (b = lv ? lv->ib_first : 0; b; b = PTR(c, otc_in_t, b)->next) {
+                int cch;
+                if (PTR(c, otc_in_t, b)->kind != OTC_IK_NOTE)
+                    continue;
+                cch = PTR(c, otc_in_t, b)->ch ? (int)PTR(c, otc_in_t, b)->ch : 255;
+                if (!nseen) {
+                    nch = (uint32_t)cch;
+                    nseen = 1;
+                } else if ((int)nch != cch) {
+                    nch = 255;
+                }
+            }
+            en[39] = (uint8_t)nch;                           /* the note channel a live script answers (255: any, 0: none) */
+        }
         wr16(en + 40, em.file_off);
         wr16(en + 42, f->line);
         wr16(en + 44, coder);
@@ -1320,7 +1513,7 @@ uint32_t otc_emit(void *ws, uint8_t *out, uint32_t cap)
         wr16(en + 48, auxr);
         wr16(en + 50, 4u * liner);
         wr16(en + 52, fx->nlines);
-        auxr += 8u * f->nparams + 2u * f->nargs + 4u * fx->nctr + (f->page_line ? 2u : 0u) + (f->confirm_line ? 2u : 0u) + gen_typed_aux_len(c, f);
+        auxr += 8u * f->nparams + 2u * f->nargs + 4u * fx->nctr + (f->page_line ? 2u : 0u) + (f->module_line ? 4u : 0u) + (f->confirm_line ? 2u : 0u) + gen_live_aux_len(c, f) + gen_typed_aux_len(c, f);
         liner += fx->nlines;
         coder += fx->code_len;
     }

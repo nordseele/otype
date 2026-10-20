@@ -201,6 +201,7 @@ VALUE_CASES = [
     ("DIV", "div 7 2", 3), ("DIV", "/ -7 2", -3), ("DIV", "div 7 -2", -3), ("DIV", "div 5 0", 0),
     ("DIV", "div -32768 -1", 32767),
     ("MOD", "mod -1 4", 3), ("MOD", "mod 7 4", 3), ("MOD", "mod 5 0", 0),
+    ("MOD", "% -1 4", 3), ("MOD", "% 7 4", 3), ("MOD", "% 10 3", 1),
     ("MIN", "min 3 -2", -2), ("MAX", "max 3 -2", 3),
     ("ABS", "abs -9", 9), ("ABS", "abs -32768", 32767),
     ("NEG", "neg 5", -5), ("NEG", "neg -32768", 32767),
@@ -3135,6 +3136,27 @@ class TestV1NewOps(Base):
         r2 = self.go("pat.go 0\npat.go 17\npat.go 1 -1\npat.go 1 17")
         self.assertEqual(len(r2.oor), 4)
 
+    @covers("PAT.COPY")
+    def test_pat_copy(self):
+        # the whole pattern record travels: trigs, trigless locks, parameter locks
+        r = self.go("tr.add 1\ntr.add 5\npl.set 5 amp.vol 9\npat.copy 1 2\npat.go 2\n"
+                    "x has.trig 1\ny has.trig 5\nz pl.get 5 amp.vol")
+        self.assertEqual((r.globals["x"], r.globals["y"], r.globals["z"]), (1, 1, 9))
+        # the source keeps its content, and the part assigned to the pattern travels
+        self.assertEqual(r.model.pattern_lengths.get((1, 1)), r.model.pattern_lengths.get((1, 2)))
+        r = self.go("part.go 2\npat.copy 1 2\npat.go 2\nx part.cur")
+        self.assertEqual(r.globals["x"], 2)
+        # pasted onto the playing pattern: what the run reads next is the copy
+        r = self.go("tr.add 1\npat.go 2\ntr.add 3\npat.go 1\npat.copy 2 1\nx has.trig 3\ny has.trig 1")
+        self.assertEqual((r.globals["x"], r.globals["y"]), (1, 0))
+
+    @covers("PAT.COPY")
+    def test_pat_copy_refusals(self):
+        with self.assertRaises(sim.RunError):
+            self.go("pat.copy 2 2")                     # same pattern: refused, the run stops
+        r = self.go("pat.copy 0 2\npat.copy 1 17\npat.copy 17 1")
+        self.assertEqual(len(r.oor), 3)                 # outside 1..16: out of range, counted
+
     @covers("PART.CUR", "PART.GO", "PART.SAVE", "PART.RELOAD")
     def test_part_ops(self):
         r = self.go("x part.cur\npart.go 2\ny part.cur")
@@ -3288,6 +3310,356 @@ class TestV1NewOps(Base):
         prog = self.prog("trk 2:\n  tr.add 1\n  tt.add 2\n  os.add 3\n  sw.add 4\n  sl.add 5")
         r = pickup_sim(prog, (2,), seed=1)
         self.assertEqual(len(r.skipped_pickup), 5)
+
+    @covers("PLAY")
+    def test_play_op(self):
+        r = self.go("play 1\nplay 3")
+        self.assertEqual(r.plays, [(0, 1), (0, 3)])
+
+    @covers("SEQ.RUN")
+    def test_seq_run_op(self):
+        r = self.go("x seq.run")
+        self.assertEqual(r.globals["x"], 0)
+
+    @covers("SEQ.STEP")
+    def test_seq_step_op(self):
+        r = self.go("x seq.step 1\ny seq.step 2")
+        self.assertEqual(r.globals["x"], 1)
+        self.assertEqual(r.globals["y"], 1)
+
+    @covers("SEQ.MUTE")
+    def test_seq_mute_op(self):
+        r = self.go("x seq.mute 1\ny seq.mute 2")
+        self.assertEqual(r.globals["x"], 0)
+        self.assertEqual(r.globals["y"], 0)
+
+    def test_simulate_module_ticks(self):
+        code = textwrap.dedent("""
+        def seq_mod
+          in clock 24:
+            play 1
+            x add x 1
+        """).strip()
+        prog = otype.check_sources([("T.OTY", code)])
+        res, plays = sim.simulate_module(prog, "seq_mod", total_ticks=72)
+        self.assertEqual(plays, [(0, 1), (24, 1), (48, 1)])
+        self.assertEqual(res.globals["x"], 3)
+
+    @covers("GATE")
+    def test_gate_op_emits_at_the_block_tick(self):
+        code = textwrap.dedent("""
+        def acid
+          in clock 24:
+            gate 1
+            prob 100: gate 3
+        """).strip()
+        prog = otype.check_sources([("T.OTY", code)])
+        self.assertEqual([d for d in prog.diags if d.level == "error"], [])
+        res, _plays = sim.simulate_module(prog, "acid", total_ticks=24)
+        self.assertEqual(res.gates, [(0, 1), (0, 3)])
+
+    @covers("OUT")
+    def test_out_op_publishes_and_holds(self):
+        code = textwrap.dedent("""
+        def acid
+          in clock 24:
+            out 1 42
+            out 4 7
+        """).strip()
+        prog = otype.check_sources([("T.OTY", code)])
+        self.assertEqual([d for d in prog.diags if d.level == "error"], [])
+        res, _plays = sim.simulate_module(prog, "acid", total_ticks=24)
+        self.assertEqual(res.outs, [42, 0, 0, 7])
+
+    @covers("CV")
+    def test_cv_op_reads_the_running_script_by_name(self):
+        code = textwrap.dedent("""
+        def follow
+          var v 5
+          in gate acid 1:
+            x cv acid 1
+            y cv acid 2
+            z cv nothere 1
+            t cv acid v
+        """).strip()
+        prog = otype.check_sources([("T.OTY", code)])
+        self.assertEqual([d for d in prog.diags if d.level == "error"], [])
+
+        def _make_gate_run(*args, **kwargs):
+            r = sim.Run(*args, **kwargs)
+            r.current_event = {"type": "GATE", "gate.name": "ACID", "gate.out": 1}
+            r.module_outs = {"ACID": [42, 0, 0, 0]}
+            return r
+        r = sim.simulate(prog, "follow", run_class=_make_gate_run)
+        self.assertEqual(r.globals["x"], 42)
+        self.assertEqual(r.globals["y"], 0)
+        self.assertEqual(r.globals["z"], 0)
+        self.assertEqual(r.globals["t"], 0)          # out of range
+        # a gate on another output does not wake the block
+        def _make_gate2_run(*args, **kwargs):
+            r = sim.Run(*args, **kwargs)
+            r.current_event = {"type": "GATE", "gate.name": "ACID", "gate.out": 2}
+            r.module_outs = {"ACID": [42, 0, 0, 0]}
+            return r
+        r2 = sim.simulate(prog, "follow", run_class=_make_gate2_run)
+        self.assertEqual(r2.globals["x"], 0)
+
+    @covers("NX.SMP", "NX.PL")
+    def test_nx_smp_and_nx_pl(self):
+        code = textwrap.dedent("""
+        def test_mod
+          in clock 24:
+            nx.smp 3
+            nx.pl fx1 1 45
+            play 1
+            play 2
+        """).strip()
+        prog = otype.check_sources([("T.OTY", code)])
+        self.assertEqual([d for d in prog.diags if d.level == "error"], [])
+        res, plays = sim.simulate_module(prog, "test_mod", total_ticks=24)
+        self.assertEqual(plays, [(0, 1, 3, {18: 45}), (0, 2)])
+
+    @covers("NOTE.NUM", "NOTE.VEL", "NOTE.CH", "CC.NUM", "CC.VAL", "CC.CH")
+    def test_note_and_cc_events(self):
+        code = textwrap.dedent("""
+        def midi_mod
+          var note_n 0
+          var note_v 0
+          var note_c 0
+          in note:
+            note_n note.num
+            note_v note.vel
+            note_c note.ch
+          in cc 1 7:
+            x cc.num
+            y cc.val
+            z cc.ch
+        """).strip()
+        prog = otype.check_sources([("T.OTY", code)])
+        self.assertEqual([d for d in prog.diags if d.level == "error"], [])
+        def _make_note_run(*args, **kwargs):
+            r = sim.Run(*args, **kwargs)
+            r.current_event = {"type": "NOTE", "note.num": 60, "note.vel": 100, "note.ch": 2, "ch": 2}
+            return r
+        r1 = sim.simulate(prog, "midi_mod", run_class=_make_note_run)
+        self.assertEqual(r1.fn_vars["MIDI_MOD"]["NOTE_N"], 60)
+        self.assertEqual(r1.fn_vars["MIDI_MOD"]["NOTE_V"], 100)
+        self.assertEqual(r1.fn_vars["MIDI_MOD"]["NOTE_C"], 2)
+        self.assertEqual(r1.globals["x"], 0)
+
+        def _make_cc_run(*args, **kwargs):
+            r = sim.Run(*args, **kwargs)
+            r.current_event = {"type": "CC", "cc.num": 7, "cc.val": 127, "cc.ch": 1, "ch": 1, "num": 7}
+            return r
+        r2 = sim.simulate(prog, "midi_mod", run_class=_make_cc_run)
+        self.assertEqual(r2.globals["x"], 7)
+        self.assertEqual(r2.globals["y"], 127)
+        self.assertEqual(r2.globals["z"], 1)
+        self.assertNotIn("NOTE_N", r2.fn_vars.get("MIDI_MOD", {}))
+
+    @covers("TRIG.STEP", "TRIG.HIT", "TRIG.VAL")
+    def test_trig_events(self):
+        """`in trig t:` and `in trig t all:`.  The script genre is refused in 1.1, so no source reaches
+        `trig.val` any more: its handler stays for the bytecode's genre 2 (1.2 brings the poster back)."""
+        code = textwrap.dedent("""
+        def trig_mod
+          var st 0
+          var hi 0
+          in trig 3:
+            st trig.step
+            hi trig.hit
+          in trig 4 all:
+            x trig.hit
+        """).strip()
+        prog = otype.check_sources([("T.OTY", code)])
+        self.assertEqual([d for d in prog.diags if d.level == "error"], [])
+
+        def run(ev):
+            def _make(*args, **kwargs):
+                r = sim.Run(*args, **kwargs)
+                r.current_event = ev
+                return r
+            return sim.simulate(prog, "trig_mod", run_class=_make)
+
+        r1 = run({"type": "TRIG", "track": 3, "trig.step": 11, "trig.hit": 1, "trig.val": 0,
+                  "trig.genre": 0})
+        self.assertEqual(r1.fn_vars["TRIG_MOD"]["ST"], 11)
+        self.assertEqual(r1.fn_vars["TRIG_MOD"]["HI"], 1)
+        r2 = run({"type": "TRIG", "track": 3, "trig.step": 11, "trig.hit": 0, "trig.val": 0,
+                  "trig.genre": 0})
+        self.assertNotIn("ST", r2.fn_vars.get("TRIG_MOD", {}))      # `in trig 3:`: not played, no wake
+        r3 = run({"type": "TRIG", "track": 4, "trig.step": 12, "trig.hit": 0, "trig.val": 0,
+                  "trig.genre": 0})
+        self.assertEqual(r3.globals["x"], 0)                        # `all`: wakes, trig.hit = 0
+        self.assertNotIn("ST", r3.fn_vars.get("TRIG_MOD", {}))
+        r6 = run({"type": "TRIG", "track": 3, "trig.step": 1, "trig.hit": 1, "trig.val": 7,
+                  "trig.genre": 0})
+        self.assertEqual(r6.fn_vars["TRIG_MOD"]["ST"], 1)            # a trig on track 3 does not wake track 4's `all`
+        self.assertEqual(r6.globals["x"], 0)
+        bad = otype.check_sources([("S.OTY", "def s\n  in trig 5 script:\n    z trig.val\n")])
+        self.assertIn("in trig t script: is not available in 1.1: use in trig t: or in trig t all:",
+                      [d.msg for d in bad.diags])
+
+    @covers("SEND.NOTE", "SEND.CC", "SEND.PROG")
+    def test_send_midi_ops(self):
+        code = textwrap.dedent("""
+        def test_send
+          send.note 1 60 100 24
+          send.cc 2 74 120
+          send.prog 3 10
+        """).strip()
+        prog = otype.check_sources([("T.OTY", code)])
+        self.assertEqual([d for d in prog.diags if d.level == "error"], [])
+        res = sim.simulate(prog, "test_send")
+        self.assertEqual(res.midi_out, [
+            (0, "note", 1, 60, 100, 24),
+            (0, "cc", 2, 74, 120),
+            (0, "prog", 3, 10),
+        ])
+
+        # Test in a live module
+        code_mod = textwrap.dedent("""
+        def mod_send
+          in clock 24:
+            send.note 1 60 100 24
+        """).strip()
+        prog_mod = otype.check_sources([("T.OTY", code_mod)])
+        res_m, plays = sim.simulate_module(prog_mod, "mod_send", total_ticks=48)
+        self.assertEqual(res_m.midi_out, [(24, "note", 1, 60, 100, 24)])
+
+        # Test dynamic runtime out-of-range checking via expressions
+        code_bad1 = "send.note (sub 1 1) 60 100 24"
+        res_bad1 = self.go("a 0\nsend.note a 60 100 24")
+        self.assertEqual(res_bad1.midi_out, [])
+        self.assertEqual(len(res_bad1.oor), 1)
+
+        res_bad2 = self.go("a 128\nsend.note 1 a 100 24")
+        self.assertEqual(res_bad2.midi_out, [])
+        self.assertEqual(len(res_bad2.oor), 1)
+
+        res_bad3 = self.go("a 0\nsend.note 1 60 100 a")
+        self.assertEqual(res_bad3.midi_out, [])
+        self.assertEqual(len(res_bad3.oor), 1)
+
+    def test_nx_outside_module_refused(self):
+        code = textwrap.dedent("""
+        def menu_fn
+          menu "M" >> "ACT"
+          nx.smp 1
+        """).strip()
+        prog = otype.check_sources([("T.OTY", code)])
+        self.assertTrue(any("only allowed in a live script" in str(d) for d in prog.diags))
+
+    @covers("RT.ADD", "RT.DEL", "RT.CLR", "RT.SRC", "REC.SRC", "REC.LEN")
+    def test_recorder_trig_and_setup_ops(self):
+        # 1. rt.add with default src=7 and explicit src
+        res = self.go("rt.add 1\nrt.add 5 2\nrt.src 1 1")
+        m = res.model.tracks[1].masks
+        # step 1: was 7, then rt.src 1 1 -> AB only (bit 0 set, bit 1 and 2 clear)
+        self.assertEqual(m["rec1"] & 1, 1)
+        self.assertEqual(m["rec2"] & 1, 0)
+        self.assertEqual(m["rec3"] & 1, 0)
+        # step 5: was 2 (CD only -> bit 1 set, bit 0 and 2 clear)
+        self.assertEqual(m["rec1"] & (1 << 4), 0)
+        self.assertEqual(m["rec2"] & (1 << 4), 1 << 4)
+        self.assertEqual(m["rec3"] & (1 << 4), 0)
+
+        # 2. rt.del: the four recorder masks of the step go, the PLAYBACK trig word of the step stays
+        #    (the recorder micro-timing byte is a pattern byte no operation of OType models)
+        res_del = self.go("tr.add 1\nmicro.set 1 5\ntt.add 2\nrt.add 1\nrt.del 1")
+        td = res_del.model.tracks[1]
+        self.assertEqual([td.has(k, 1) for k in ("rec1", "rec2", "rec3", "m38")], [False] * 4)
+        self.assertTrue(td.has("trig", 1))
+        self.assertEqual(td.micro.get(1), 5)      # a playback micro-timing is not a recorder setting
+        self.assertTrue(td.has("tless", 2))       # nor is a trigless trig a recorder trig
+
+        # 3. rt.clr: every step of the context, the playback trigs untouched
+        res_clr = self.go("tr.add 3\nrt.add 1\nrt.add 2\nrt.clr")
+        m_clr = res_clr.model.tracks[1].masks
+        self.assertEqual((m_clr["rec1"], m_clr["rec2"], m_clr["rec3"], m_clr["m38"]), (0, 0, 0, 0))
+        self.assertTrue(res_clr.model.tracks[1].has("trig", 3))
+
+        # 4. rec.src and rec.len
+        res_rec = self.go("rec.src 1 1 2\nrec.src 1 2 3\nrec.src 1 3 1\nrec.len 1 4")
+        p = res_rec.model.part[1].rec_setup
+        self.assertEqual(p[0], 2)  # INAB = 2 (A)
+        self.assertEqual(p[1], 3)  # INCD = 3 (D)
+        self.assertEqual(p[4], 1)  # SRC3 = 1 (MAIN)
+        self.assertEqual(p[2], 3)  # RLEN 4 pas : la part le stocke 0-based
+
+        # 5. Out of range checking: track, source number, stock value, length, and a source MASK
+        #    outside 1..7 (refused, not truncated: 8 is not "SRC3 only")
+        bad = self.go("a 9\nrec.src a 1 1")
+        self.assertEqual(len(bad.oor), 1)
+        bad_src = self.go("a 4\nrec.src 1 a 1")
+        self.assertEqual(len(bad_src.oor), 1)
+        bad_val = self.go("a 5\nrec.src 1 1 a")
+        self.assertEqual(len(bad_val.oor), 1)
+        bad_len = self.go("a 65\nb 0\nrec.len 1 a\nrec.len 1 b")
+        self.assertEqual(len(bad_len.oor), 2)
+        self.assertEqual(self.go("rec.len 1 64").model.part[1].rec_setup[2], 64)   # 64 = MAX, stock byte 64
+        bad_mask = self.go("a 0\nrt.add 1 a\nb 8\nrt.src 2 b")
+        self.assertEqual(len(bad_mask.oor), 2)
+        self.assertEqual(bad_mask.model.tracks[1].masks["rec1"] | bad_mask.model.tracks[1].masks["rec2"]
+                         | bad_mask.model.tracks[1].masks["rec3"], 0)
+
+    @covers("RO.ADD", "RO.DEL")
+    def test_one_shot_recorder_trigs(self):
+        """ro.add is rt.add plus the one-shot state (TRAC +0x38): that bit is the ONLY difference between the two
+        families, and ro.del removes a recorder trig of either kind."""
+        res = self.go("ro.add 1\nro.add 3 2")
+        td = res.model.tracks[1]
+        self.assertEqual([td.has(k, 1) for k in ("rec1", "rec2", "rec3", "m38")], [True] * 4)
+        self.assertEqual([td.has(k, 3) for k in ("rec1", "rec2", "rec3", "m38")], [False, True, False, True])
+        self.assertFalse(self.go("rt.add 1").model.tracks[1].has("m38", 1))    # a plain recorder trig is not one-shot
+        res_del = self.go("ro.add 1\nrt.add 2\nro.del 1\nro.del 2")
+        self.assertEqual([[res_del.model.tracks[1].has(k, s) for k in ("rec1", "rec2", "rec3", "m38")]
+                          for s in (1, 2)], [[False] * 4, [False] * 4])
+        bad = self.go("a 0\nb 8\nro.add 1 a\nro.add 2 b")
+        self.assertEqual(len(bad.oor), 2)
+        self.assertFalse(any(bad.model.tracks[1].has(k, s) for s in (1, 2)
+                             for k in ("rec1", "rec2", "rec3", "m38")))
+
+    @covers("REC.TRIG", "REC.LOOP")
+    def test_recorder_trig_mode_and_loop(self):
+        res = self.go("rec.trig 1 1\nrec.loop 1 1\nrec.trig 2 2")
+        p = res.model.part[1].rec_setup
+        self.assertEqual((p[3], p[5]), (1, 1))         # the part's own bytes: TRIG and LOOP, next to the sources
+        self.assertEqual(res.model.part[2].rec_setup[3], 2)
+        self.assertEqual(self.go("rec.trig 3 0\nrec.loop 3 0").model.part[3].rec_setup,
+                         {3: 0, 5: 0})
+        bad = self.go("a 3\nb 2\nrec.trig 1 a\nrec.loop 1 b")
+        self.assertEqual(len(bad.oor), 2)
+
+    @covers("REC.ARM")
+    def test_recorder_arm(self):
+        res = self.go("rec.arm 2\nrec.arm 1 3\ntrk 3\nrec.arm 3")
+        self.assertEqual(res.model.rec_arms, [(2, 7), (1, 3), (3, 7)])
+        bad = self.go("a 0\nb 9\nrec.arm 1 a\nrec.arm b")
+        self.assertEqual(len(bad.oor), 2)
+        self.assertEqual(bad.model.rec_arms, [])
+
+    @covers("MIDI.CC", "MIDI.NOTE", "MIDI.VEL")
+    def test_the_midi_in_tables(self):
+        """The three reads answer what the MIDI IN hook stored (the unit's tables), 0 before anything came in."""
+        m = sim.Model()
+        m.midi_cc[(1, 74)] = 64
+        m.midi_note[2] = 60
+        m.midi_vel[2] = 100
+        r = self.go("x midi.cc 1 74\ny midi.note 2\nz midi.vel 2\nt midi.cc 2 74", model=m)
+        self.assertEqual([r.globals[k] for k in "xyzt"], [64, 60, 100, 0])
+        bad = self.go("a 0\nb 17\nc 128\nx midi.cc a 0\ny midi.cc b 0\nz midi.cc 1 c", model=m)
+        self.assertEqual(len(bad.oor), 3)
+
+    @covers("SEND.NRPN")
+    def test_send_nrpn_is_four_control_changes(self):
+        r = self.go("send.nrpn 1 300 16383")
+        self.assertEqual(r.midi_out, [(0, "cc", 1, 99, 2), (0, "cc", 1, 98, 44),
+                                      (0, "cc", 1, 6, 127), (0, "cc", 1, 38, 127)])   # 300 = 2<<7 | 44
+        bad = self.go("a 16384\nb 0\nsend.nrpn 1 a 0\nsend.nrpn b 1 1")
+        self.assertEqual(bad.midi_out, [])
+        self.assertEqual(len(bad.oor), 2)
+
 
 
 # ================================================================================================

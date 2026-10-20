@@ -352,6 +352,80 @@ def py_rep(sources, profile=None):
     return oterr.reference(sources, profile)[0]
 
 
+# The `in` block language: `in clock/note/cc` blocks, `var`, `param ... cc ch n|note ch|vel ch`, `launch N`, and the
+# refusals that go with them (`module`/`clock` gone, names over 8, menu-only ops in a live script). The stored corpus predates
+# all of it (its dump cannot even see an `in` block), so the C is compared here with the Python of today, on the front dump,
+# the report and the table, both profiles.
+IN_BLOCK_CASES = [
+    ("launch+clock", "def beat\n  launch 384\n  in clock 96:\n    tr.add 1\n"),
+    ("in-clock", "def live\n  in clock 24:\n    tr.add 1\n"),
+    ("in-note", "def live\n  in note 3:\n    a note.num\n"),
+    ("in-note-any", "def live\n  in note:\n    a note.vel\n"),
+    ("in-cc", "def live\n  in cc 2 74:\n    a cc.val\n"),
+    ("two-notes", "def live\n  in note 1:\n    tr.add 1\n  in note 2:\n    tr.add 2\n"),
+    ("in-const", "const c 24\ndef live\n  in clock c:\n    tr.add 1\n"),
+    ("dup-in-clock", "def bad\n  in clock 24:\n    tr.add 1\n  in clock 24:\n    tr.add 2\n"),
+    ("dup-in-note", "def bad\n  in note:\n    tr.add 1\n  in note:\n    tr.add 2\n"),
+    ("dup-in-cc", "def bad\n  in cc 1 7:\n    tr.add 1\n  in cc 1 7:\n    tr.add 2\n"),
+    ("in-no-colon", "def bad\n  in clock 24\n    tr.add 1\n"),
+    ("in-bad-kind", "def bad\n  in foo 3:\n    tr.add 1\n"),
+    ("in-nested", "def bad\n  in clock 24:\n    if 1:\n      in note:\n        tr.add 1\n"),
+    ("outside-in", "def bad\n  tr.add 1\n  in clock 24:\n    tr.add 2\n"),
+    ("note-outside", "def bad\n  a note.num\n"),
+    ("cc-wrong-block", "def bad\n  in note:\n    a cc.val\n"),
+    ("var-func", "def live\n  var v 10\n  in clock 24:\n    a v\n"),
+    ("var-inblock", "def live\n  in clock 24:\n    var lv 5\n    a lv\n"),
+    ("var-assign", "def live\n  var v 1\n  in clock 24:\n    v 2\n    a v\n"),
+    ("var-shadow", "def live\n  var v 1\n  in clock 24:\n    var v 2\n    a v\n"),
+    ("var-notvisible", "def live\n  in clock 24:\n    var lv 5\n  in note:\n    a lv\n"),
+    ("var-dup", "def live\n  var v 1\n  var v 2\n  in clock 24:\n    tr.add 1\n"),
+    ("var-no-init", "def live\n  in clock 24:\n    var v\n    tr.add 1\n"),
+    ("var-bad-init", "def live\n  in clock 24:\n    var v \"x\"\n    tr.add 1\n"),
+    ("var-file-level", "var x 1\ndef foo\n  tr.add 1\n"),
+    ("param-cc", "def live\n  param p 60 0 127 cc 1 74\n  in clock 24:\n    m.set 1 p\n"),
+    ("param-note", "def live\n  param n 60 0 127 note 2\n  in note 2:\n    m.set 1 n\n"),
+    ("param-vel", "def live\n  param v 100 0 127 vel 2\n  in note 2:\n    m.set 1 v\n"),
+    ("param-cc-ch-param", "def live\n  param q 1 0 16\n  param p 60 0 127 cc q 74\n  in clock 24:\n    tr.add 1\n"),
+    ("percent", "def ok\n  a % 10 3\n  a mod 10 3\n"),
+    ("module-gone", "def bad\n  module \"TEST\"\n  tr.add 1\n"),
+    ("clock-gone", "def bad\n  clock 24\n  tr.add 1\n"),
+    ("launch-not-live", "def bad\n  launch 384\n  tr.add 1\n"),
+    ("launch-zero", "def bad\n  launch 0\n  in clock 96:\n    tr.add 1\n"),
+    ("launch-dup", "def bad\n  launch 384\n  launch 96\n  in clock 96:\n    tr.add 1\n"),
+    ("name-too-long", "def longname\n  in clock 24:\n    tr.add 1\n"),
+    ("live-args", "def live | y\n  in clock 24:\n    tr.add y\n"),
+    ("live-page", "def live\n  page \"P\"\n  in clock 24:\n    tr.add 1\n"),
+    ("live-confirm", "def live\n  in clock 24:\n    confirm\n    tr.add 1\n"),
+    ("live-patcopy", "def live\n  in clock 24:\n    pat.copy 1 2\n"),
+]
+
+
+class TestInBlockLanguage(unittest.TestCase):
+    """The language of the `in` blocks, C against the Python of today: front dump, report and table, both profiles."""
+
+    def check(self, text):
+        s = src(text)
+        a, b = front_dump.front_dump(s), cc().dump(s)
+        self.assertEqual(a, b, first_diff(a, b))
+        for prof in (None, "m1"):
+            pr, pt = oterr.reference(s, prof)
+            o, r = cc().compile(s, prof)
+            self.assertEqual(cc().err, 0)
+            self.assertEqual(r, pr, first_diff(pr, r))
+            self.assertEqual(o, pt, "table differs (%d / %d bytes)" % (len(o or b""), len(pt)))
+
+    def test_the_language(self):
+        for name, text in IN_BLOCK_CASES:
+            with self.subTest(name):
+                self.check(text)
+
+    def test_percent_is_mod(self):
+        for text in ("def f\n  a % 10 3\n", "def f\n  a mod 10 3\n"):
+            self.check(text)
+        self.assertEqual(cc().compile(src("def f\n  a % 10 3\n"), None)[0],
+                         cc().compile(src("def f\n  a mod 10 3\n"), None)[0])
+
+
 # Source sets that exercise a corner of the checker (kinds, ranges, constness, cost, graph, compiler diagnostics); the C report
 # is compared with Python's, and every `expect` fragment must be in it so that the comparison cannot be vacuous.
 REPORT_CASES = [

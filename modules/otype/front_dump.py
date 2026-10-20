@@ -97,6 +97,8 @@ def _expr(n):
         return "(list %s %s)" % (n.text, ",".join(str(v) for v in n.val))
     if k == "cond":
         return "(cond %s %s)" % (n.text, n.val)
+    if k == "var_named":
+        return "(var_named %s)" % n.name
     if k in ("var", "arg", "param", "const"):
         return "(%s %s)" % (k, n.name)
     if k == "op":
@@ -108,8 +110,8 @@ def _expr(n):
         return "(kw %s)" % n.name
     if k == "pred":
         return "(pred %s %s)" % (n.text, n.op.name)
-    if k == "assign":
-        return "(assign %s %s)" % (n.name, _expr(n.args[0]))
+    if k in ("assign", "assign_var_named"):
+        return "(%s %s %s)" % (k, n.name, _expr(n.args[0]))
     if k in ("opstmt", "callstmt", "ctxstmt"):
         return "(%s %s %s)" % (k, n.text, _expr(n.node))
     if k == "setstmt":
@@ -183,6 +185,10 @@ def dump(prog):
             out.append('menu %d levels=%s action="%s"' % (line, ",".join('"%s"' % s for s in levels) or "-", action))
         if f.page is not None:
             out.append('page %d "%s"' % (f.page[1], f.page[0]))
+        if f.module is not None:
+            out.append('module %d "%s"' % (f.module[1], f.module[0]))
+        if f.clock is not None:
+            out.append('clock %d %d' % (f.clock[1], f.clock[0]))
         if f.confirm_text is not None:
             out.append('confirm %d "%s"' % (f.confirm_text[1], f.confirm_text[0]))
         _lines(out, f.body, 1)

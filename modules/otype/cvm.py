@@ -328,6 +328,25 @@ class HostParams:
         self.model.pmodel = self.pm
         self.parts = self.model.part
         self.track_blocks = {}
+        self.rec_arms = []                # (track, source mask) of every rec.arm, as the simulator records them
+
+    def empty_blocks(self):
+        """The 8 bound TRAC blocks of a pattern nothing has written yet (the VM's defaults)."""
+        blocks = {}
+        for t in range(1, 9):
+            blk = bytearray(sim.RAM_TRAC_SIZE)
+            blk[0x40:0x48] = sim.SWING_DEFAULT.to_bytes(8, "big")
+            blk[0x50] = 16
+            blk[0x59:0x859] = bytes([255]) * 0x800
+            blocks[t] = blk
+        return blocks
+
+    def blocks_for(self, bank, pattern):
+        """The blocks of a pattern the run has not visited: an empty one (as the unit's bank has)."""
+        key = (bank, pattern)
+        if key not in self.track_blocks:
+            self.track_blocks[key] = self.empty_blocks()
+        return self.track_blocks[key]
 
     def info(self, track0, p):
         self.log.append(("info", track0, p))
@@ -426,6 +445,21 @@ class HostParams:
             setattr(pt, name.split(".")[1].lower(), sim.clamp(v, 0, 127))
         elif name == "LFOD.SET": pt.lfod[n - 1] = sim.clamp(v, -64, 63)
         elif name == "LFOD.INTERP": pt.lfod_interp[n - 1] = int(bool(v))
+        elif name == "REC.SRC":
+            if not 1 <= n <= 3: return 0
+            if n in (1, 2) and not 0 <= v <= 4: return 0
+            if n == 3 and not 0 <= v <= 10: return 0
+            off = 0 if n == 1 else 1 if n == 2 else 4
+            pt.rec_setup[off] = v
+        elif name == "REC.LEN":
+            if not 1 <= v <= 64: return 0
+            pt.rec_setup[2] = 64 if v == 64 else v - 1      # the part holds RLEN 0-based, 64 = MAX
+        elif name == "REC.TRIG":
+            if not 0 <= v <= 2: return 0
+            pt.rec_setup[3] = v
+        elif name == "REC.LOOP":
+            if not 0 <= v <= 1: return 0
+            pt.rec_setup[5] = v
         else:
             if name == "LFO.WAVE":
                 rg = (0, self.pm.waves() - 1) if self.pm.waves() else None
@@ -444,6 +478,9 @@ class HostParams:
             if not a: self.model.fill_once = 0
         elif name == "FILL.ONCE": self.model.fill_once = 1
         elif name == "OS.ARM": self.model.tracks[a + 1].os_armed = 1
+        elif name == "REC.ARM":
+            if not 1 <= b <= 7: return 0
+            self.rec_arms.append((a + 1, b))
         else:
             self.track_blocks[self.model.bank, self.model.pattern] = cv.blocks()
             if name == "PAT.GO": self.model.go_pattern(b, a)
@@ -452,6 +489,14 @@ class HostParams:
                 target = self.parts if a == self.model.part_cur else self.model.parts.setdefault(
                     (self.model.bank, a), {t: sim.PartData() for t in range(1, 9)})
                 self.model.saved_parts[self.model.bank, a] = copy.deepcopy(target)
+            elif name == "PAT.COPY":
+                # the stock paste: the whole pattern record (the 8 bound blocks) of `a` replaces `b`'s; the part
+                # assigned to the pattern and the length travel too, the parts' data do not.
+                self.track_blocks[(self.model.bank, b)] = copy.deepcopy(self.blocks_for(self.model.bank, a))
+                if (self.model.bank, a) in self.model.pattern_lengths:
+                    self.model.pattern_lengths[self.model.bank, b] = self.model.pattern_lengths[self.model.bank, a]
+                if (self.model.bank, a) in self.model.part_links:
+                    self.model.part_links[self.model.bank, b] = self.model.part_links[self.model.bank, a]
             elif name == "PART.RELOAD":
                 if (self.model.bank, a) not in self.model.saved_parts: return 4
                 self.model.parts[self.model.bank, a] = copy.deepcopy(self.model.saved_parts[self.model.bank, a])
@@ -460,14 +505,7 @@ class HostParams:
             self.parts = self.model.part
             key = self.model.bank, self.model.pattern
             if key not in self.track_blocks:
-                blocks = {}
-                for t in range(1, 9):
-                    blk = bytearray(sim.RAM_TRAC_SIZE)
-                    blk[0x40:0x48] = sim.SWING_DEFAULT.to_bytes(8, "big")
-                    blk[0x50] = 16
-                    blk[0x59:0x859] = bytes([255]) * 0x800
-                    blocks[t] = blk
-                self.track_blocks[key] = blocks
+                self.track_blocks[key] = self.empty_blocks()
             for t, blk in self.track_blocks[key].items():
                 cv.bind(t, blk, self.parts[t].mtype, copy=True)
         return 0
@@ -617,6 +655,12 @@ class CVM:
         L.otc_vm_fn_confirm.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char_p)]
         L.otc_vm_fn_input_sample.restype = ctypes.c_uint32    # input sample
         L.otc_vm_fn_input_sample.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        L.otc_vm_fn_module.restype = ctypes.c_uint32          # module functions
+        L.otc_vm_fn_module.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char_p)]
+        L.otc_vm_fn_clock.restype = ctypes.c_uint32
+        L.otc_vm_fn_clock.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        L.otc_vm_fn_launch.restype = ctypes.c_uint32          # `launch N` of a live script
+        L.otc_vm_fn_launch.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
         L.otc_vm_fn_param.restype = ctypes.c_int
         L.otc_vm_fn_param.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p]
         L.otc_vm_set_params.restype = None
@@ -627,11 +671,19 @@ class CVM:
         L.otb_shim_set.argtypes = [ctypes.c_void_p] * 8
         L.otb_shim_set_audio.restype = None                   # audio imports
         L.otb_shim_set_audio.argtypes = [ctypes.c_void_p] * 9
+        L.otb_shim_set_seq.restype = None                     # sequencer / module imports
+        L.otb_shim_set_seq.argtypes = [ctypes.c_void_p] * 4
         L.otb_shim_set_params.restype = None                  # the part's descriptor / value
         L.otb_shim_set_params.argtypes = [ctypes.c_void_p] * 2
         L.otb_shim_set_part.restype = None                    # the part writes
         L.otb_shim_set_part.argtypes = [ctypes.c_void_p] * 11
         L.otb_shim_set_control.argtypes = [ctypes.c_void_p] * 4
+        L.otb_shim_set_midi_out.restype = None
+        L.otb_shim_set_midi_out.argtypes = [ctypes.c_void_p] * 3
+        L.otb_shim_midi_in.restype = None
+        L.otb_shim_midi_in.argtypes = [ctypes.c_uint32] * 3
+        L.otb_shim_midi_in_clear.restype = None
+        L.otb_shim_midi_in_clear.argtypes = []
         L.otc_vm_part_touched.restype = ctypes.c_uint32
         L.otc_vm_part_touched.argtypes = [ctypes.c_void_p]
         self.size = L.otc_vm_sizeof()
@@ -761,6 +813,42 @@ class CVM:
             F(I, T.c_void_p, U, I, I)(guard(lambda ptr, h, a, b: hp.control_action(self, names[h], a, b), 3)))
         self.lib.otb_shim_set_control(*[T.cast(f, T.c_void_p) for f in self._vcbs], None)
         return hp
+
+    # ---- what send.* handed to the UART ------------------------------------------------
+    def bind_midi_out(self, sink=None):
+        """The host side of send.note / send.cc / send.prog / send.nrpn: `sink(kind, *args)` sees each message as
+        the unit's sender would put it on the wire (None: nothing recorded)."""
+        T = ctypes
+        if sink is None:
+            self.lib.otb_shim_set_midi_out(None, None, None)
+            self._midi_cbs, self.midi_out = (), None
+            return None
+
+        def guard(f):
+            def g(*a):
+                try:
+                    f(*a)
+                except BaseException as e:           # a callback must never raise into C
+                    self.errors.append(e)
+            return g
+        self._midi_cbs = (
+            T.CFUNCTYPE(None, T.c_uint32, T.c_uint32, T.c_uint32, T.c_uint32)(
+                guard(lambda ch, n, val, dur: sink("note", ch, n, val, dur))),
+            T.CFUNCTYPE(None, T.c_uint32, T.c_uint32, T.c_uint32)(
+                guard(lambda ch, n, val: sink("cc", ch, n, val))),
+            T.CFUNCTYPE(None, T.c_uint32, T.c_uint32)(guard(lambda ch, p: sink("prog", ch, p))))
+        self.lib.otb_shim_set_midi_out(*[T.cast(f, T.c_void_p) for f in self._midi_cbs])
+        self.midi_out = sink
+        return sink
+
+    # ---- the MIDI IN tables (what the unit's hook stored) --------------------------------
+    def midi_in(self, ch, num, val):
+        """Feed the shim's MIDI IN tables as the unit's hook does: the last CC value on (ch, num), and the
+        last note (num) with its velocity (val) on ch."""
+        self.lib.otb_shim_midi_in(ch, num, val)
+
+    def midi_in_clear(self):
+        self.lib.otb_shim_midi_in_clear()
 
     # ---- audio imports ----------------------------------------------------------------
     def bind_audio(self, audio=None):
@@ -896,6 +984,25 @@ class CVM:
         if not n:
             return None
         return ctypes.string_at(ctypes.cast(lab, ctypes.c_void_p).value, n).decode("latin-1")
+
+    def fn_module(self, func):
+        """The module label of function `func` (a name or an index), or None (otc_vm_fn_module)."""
+        idx = func if isinstance(func, int) else self.table.fmap[func.upper()].index
+        lab = ctypes.c_char_p()
+        n = self.lib.otc_vm_fn_module(self.ptr, idx, ctypes.byref(lab))
+        if not n:
+            return None
+        return ctypes.string_at(ctypes.cast(lab, ctypes.c_void_p).value, n).decode("latin-1")
+
+    def fn_clock(self, func):
+        """The clock ticks of module function `func` (a name or an index), or 0 (otc_vm_fn_clock)."""
+        idx = func if isinstance(func, int) else self.table.fmap[func.upper()].index
+        return int(self.lib.otc_vm_fn_clock(self.ptr, idx))
+
+    def fn_launch(self, func):
+        """The `launch N` quantum of `func` (a name or an index), or 0 (otc_vm_fn_launch)."""
+        idx = func if isinstance(func, int) else self.table.fmap[func.upper()].index
+        return int(self.lib.otc_vm_fn_launch(self.ptr, idx))
 
     def fn_confirm(self, func):
         """The text of `confirm "TEXT"` of function `func` (a name or an index), or None (otc_vm_fn_confirm)."""

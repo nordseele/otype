@@ -33,7 +33,7 @@ steps has.trig:                  # block: the steps that have a trig
 TUTORIAL = os.path.join(ROOT, "modules", "otype", "examples", "TUTORIAL.OTY")
 
 # (section title, [(category, sub-heading or None, filter)])
-STRUCTURE = ("OTYPE", "DEF", "CONST", "MENU", "PAGE", "ON", "PARAM", "CONFIRM", "INPUT")
+STRUCTURE = ("OTYPE", "DEF", "CONST", "MENU", "PAGE", "VAR", "IN", "LAUNCH", "ON", "PARAM", "CONFIRM", "INPUT")
 MODIFIERS = ("IF", "ELIF", "ELSE", "L", "EACH", "PROB", "EVERY", "SKIP", "DEL")
 FLOW = ("BREAK", "STOP", "RET")
 KWARGS = ("ALL", "CUR", "DEEP")
@@ -64,6 +64,7 @@ SECTIONS = [
     ("Files", [("FILES", None, None)]),
     ("Slots", [("SLOTS", None, None)]),
     ("Audio", [("AUDIO", None, None)]),
+    ("Modules", [("MODULES", None, None)]),
     ("Screen", [("UI", None, None)]),
 ]
 
@@ -82,6 +83,7 @@ CATEGORY_SUMMARIES = {
     "FILES": "List and filter the files of a card folder, then pick from the list.",
     "SLOTS": "Load, test, clear and swap Static and Flex slots; keep a working set of slot numbers. Bulk jobs are loops: see the cookbook.",
     "AUDIO": "Save audio takes, create sliced chains and normalize files.",
+    "MODULES": "Live sequencing modules: schedule voice playback and read sequencer state.",
     "UI": "The text of the end box: msg replaces DONE with strings and numbers.",
 }
 

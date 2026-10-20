@@ -926,10 +926,20 @@ class ArgumentKindErrors(Base):
         self.bad("DEF BAD\n  PL.CLR\n  PL.DEL 1 30\n", 3, "out of range for PARAM (0..29)")
         self.bad("DEF BAD\n  TL.FILL 101\n", 2, "out of range for PCT (0..100)")
         self.bad("CONST BIG 70\nDEF BAD\n  TR.ADD BIG\n", 3, "out of range for STEP")
+        self.bad("DEF BAD\n  SEND.NOTE 0 60 100 24\n", 2, "out of range for CH (1..16)")
+        self.bad("DEF BAD\n  SEND.NOTE 17 60 100 24\n", 2, "out of range for CH (1..16)")
+        self.bad("DEF BAD\n  SEND.NOTE 1 128 100 24\n", 2, "out of range for VAL7 (0..127)")
+        self.bad("DEF BAD\n  SEND.NOTE 1 60 128 24\n", 2, "out of range for VAL7 (0..127)")
+        self.bad("DEF BAD\n  SEND.NOTE 1 60 100 0\n", 2, "out of range for DUR (1..32767)")
+        self.bad("DEF BAD\n  SEND.CC 1 128 100\n", 2, "out of range for VAL7 (0..127)")
+        self.bad("DEF BAD\n  SEND.PROG 1 128\n", 2, "out of range for VAL7 (0..127)")
 
     def test_range_limits_are_inclusive(self):
         self.good("DEF R\n  TR.ADD 1\n  TR.ADD 64\n  TRK 1 8: TR.ADD 1\n  TRK.SLOT 1\n  TRK.SLOT 128\n"
-                  "  PL.DEL 1 0\n  PL.DEL 1 29\n  TL.FILL 0\n  TL.FILL 100\n")
+                  "  PL.DEL 1 0\n  PL.DEL 1 29\n  TL.FILL 0\n  TL.FILL 100\n"
+                  "  SEND.NOTE 1 0 0 1\n  SEND.NOTE 16 127 127 32767\n"
+                  "  SEND.CC 1 0 0\n  SEND.CC 16 127 127\n"
+                  "  SEND.PROG 1 0\n  SEND.PROG 16 127\n")
 
     def test_track_list_limit(self):
         self.bad("DEF BAD\n  TRK 1 2 3 4 5 6 7 8 1: TR.ADD 1\n", 2, "at most 8 tracks")
@@ -1092,9 +1102,9 @@ class CostTests(Base):
         self.assertEqual(self.cost("  LP | 3\n  LP | 5\n", lib), 4 * 3 + 4 * 5)
 
     def test_user_call_cost_with_const_path(self):
-        lib = ("\nDEF OUT | N\n  L 1 N: IN | N\n\nDEF IN | K\n  L 1 K: TR.ADD I\n")
-        # per path: OUT|4 -> 4 x IN|4 -> 4 x (4 x 4) = 64
-        self.assertEqual(self.cost("  OUT | 4\n", lib), 4 * 4 * 4)
+        lib = ("\nDEF OUTER | N\n  L 1 N: INNER | N\n\nDEF INNER | K\n  L 1 K: TR.ADD I\n")
+        # per path: OUTER|4 -> 4 x INNER|4 -> 4 x (4 x 4) = 64
+        self.assertEqual(self.cost("  OUTER | 4\n", lib), 4 * 4 * 4)
 
     def test_too_long_menu_function_refused(self):
         text = "DEF BIG\n" + self.MENU + "  L 1 40: TR.CLR\n"
@@ -1665,5 +1675,128 @@ class TestRenamedOpsRejection(Base):
         self.bad("DEF BAD\n  A LFO.DEP\n", 2, "lfo.dep expects 1 argument")
 
 
+class TestPatternCopy(Base):
+    """`pat.copy a b`: a destructive, menu-only operator. The checker refuses it in a live script, directly or
+    through what the live script calls (a live wake cannot ask the confirmation)."""
+
+    def test_menu_only_refused_in_a_live_script(self):
+        self.bad('DEF LIVE\n  IN CLOCK 96:\n    PAT.COPY 1 2\n', 3,
+                 "op pat.copy not allowed in a live script", func="LIVE", refused=("LIVE",))
+        self.bad('DEF LIVE\n  IN CLOCK 96:\n    HELPER\n\nDEF HELPER\n  TR.ADD 1\n  PAT.COPY 1 2\n', 3,
+                 "op pat.copy not allowed in a live script", func="LIVE", refused=("LIVE",))
+
+    def test_menu_script_accepted_and_destructive(self):
+        prog = self.check('DEF CP\n  MENU "PAT" >> "COPY"\n  PAT.COPY 1 2\n')
+        self.assertEqual([str(d) for d in prog.diags], [])
+        self.assertTrue(prog.destructive[prog.fmap["CP"]])
+        self.assertTrue(otype.O.OPS["PAT.COPY"].menu_only)
+
+    def test_arity(self):
+        self.bad('DEF CP\n  MENU "PAT" >> "COPY"\n  PAT.COPY 1\n', 3,
+                 "pat.copy expects 2 arguments (int int), got 1", func="CP", refused=("CP",))
+
+
+class TestInBlocks(Base):
+    """The `in` blocks: in clock, in note, in cc, var, param sources, rejection of module/clock."""
+
+    def test_launch_declaration(self):
+        prog = self.check('DEF BEAT\n  LAUNCH 384\n  IN CLOCK 96:\n    TR.ADD 1\n')
+        self.assertEqual(prog.diags, [])
+        self.assertEqual(prog.funcs[0].launch[0], 384)
+        self.bad('DEF BAD\n  LAUNCH 0\n  IN CLOCK 96:\n    TR.ADD 1\n', 2,
+                 "launch n: n must be >= 1 (got 0)")
+        self.bad('DEF BAD\n  LAUNCH\n  IN CLOCK 96:\n    TR.ADD 1\n', 2,
+                 "launch expects a number of ticks: launch n")
+        self.bad('DEF BAD\n  LAUNCH 384\n  LAUNCH 96\n  IN CLOCK 96:\n    TR.ADD 1\n', 3,
+                 "duplicate launch declaration (a function has at most one)")
+        self.bad('DEF BAD\n  LAUNCH 384\n  TR.ADD 1\n', 2,
+                 "launch is only allowed in a live script")
+
+    def test_rejection_of_module_and_clock(self):
+        self.bad('DEF BAD\n  MODULE "TEST"\n  TR.ADD 1\n', 2, "module is gone: use in clock n")
+        self.bad('DEF BAD\n  CLOCK 24\n  TR.ADD 1\n', 2, "clock declaration is gone: use in clock n")
+
+    def test_var_at_file_level_refused(self):
+        prog = self.check('VAR X 1\nDEF FOO\n  TR.ADD 1\n')
+        self.assertErr(prog, 1, "var at file level is not supported yet", "-")
+
+    def test_in_block_duplicates(self):
+        self.bad('DEF BAD\n  IN CLOCK 24:\n    TR.ADD 1\n  IN CLOCK 24:\n    TR.ADD 2\n', 4, "duplicate in clock 24")
+        self.bad('DEF BAD\n  IN NOTE:\n    TR.ADD 1\n  IN NOTE:\n    TR.ADD 2\n', 4, "duplicate in note")
+        self.bad('DEF BAD\n  IN NOTE 1:\n    TR.ADD 1\n  IN NOTE 1:\n    TR.ADD 2\n', 4, "duplicate in note 1")
+        self.bad('DEF BAD\n  IN CC 1 7:\n    TR.ADD 1\n  IN CC 1 7:\n    TR.ADD 2\n', 4, "duplicate in cc 1 7")
+
+    def test_event_ops_outside_in_blocks(self):
+        self.bad('DEF BAD\n  A NOTE.NUM\n', 2, "note.num only allowed in an in note block")
+        self.bad('DEF BAD\n  A NOTE.VEL\n', 2, "note.vel only allowed in an in note block")
+        self.bad('DEF BAD\n  A NOTE.CH\n', 2, "note.ch only allowed in an in note block")
+        self.bad('DEF BAD\n  A CC.NUM\n', 2, "cc.num only allowed in an in cc block")
+        self.bad('DEF BAD\n  A CC.VAL\n', 2, "cc.val only allowed in an in cc block")
+        self.bad('DEF BAD\n  A CC.CH\n', 2, "cc.ch only allowed in an in cc block")
+        # And also in a wrong block:
+        self.bad('DEF BAD\n  IN CLOCK 24:\n    A NOTE.NUM\n', 3, "note.num only allowed in an in note block")
+        self.bad('DEF BAD\n  IN NOTE:\n    A CC.VAL\n', 3, "cc.val only allowed in an in cc block")
+
+    def test_statement_outside_in_blocks_refused_when_in_blocks_exist(self):
+        self.bad('DEF BAD\n  TR.ADD 1\n  IN CLOCK 24:\n    TR.ADD 2\n', 2,
+                 "statement outside any in block (a live script organizes its code in 'in' blocks)")
+
+    def test_var_scoping_and_shadowing(self):
+        # Function-level var accessible in in-blocks
+        self.good('DEF OK\n  VAR V 10\n  IN CLOCK 24:\n    A V\n')
+        # In-block var accessible inside its block
+        self.good('DEF OK\n  IN CLOCK 24:\n    VAR LOCAL_V 5\n    A LOCAL_V\n')
+        # In-block var inaccessible outside its block
+        self.bad('DEF BAD\n  IN CLOCK 24:\n    VAR LOCAL_V 5\n  IN NOTE:\n    A LOCAL_V\n', 5,
+                 "var local_v is not visible in this block")
+        # Shadowing of function var or param or global
+        self.bad('DEF BAD\n  VAR MYVAR 1\n  VAR MYVAR 2\n  TR.ADD 1\n', 3, "duplicate var declaration myvar")
+        self.bad('DEF BAD\n  MENU "A" >> "B"\n  PARAM P INT 1 0 10\n  VAR P 2\n  TR.ADD 1\n', 4, "var p has the name of a param")
+
+    def test_mod_percent_alias(self):
+        self.good('DEF OK\n  A % 10 3\n')
+        self.good('DEF OK\n  A % -1 4\n')
+        self.good('DEF OK\n  A MOD 10 3\n')
+
+
+class TestTrigBlocks(Base):
+    """The trig blocks: `in trig t:`, `in trig t all:` and their event words.  The script genre waits for 1.2."""
+
+    def test_genres_parse(self):
+        prog = self.good('DEF M\n  IN TRIG 3:\n    A TRIG.STEP\n    B TRIG.HIT\n'
+                         '  IN TRIG 4 ALL:\n    C TRIG.HIT\n')
+        blocks = prog.funcs[0].in_blocks
+        self.assertEqual([(b.kind, b.ch, b.num) for b in blocks],
+                         [("TRIG", 3, 0), ("TRIG", 4, 1)])
+        self.assertEqual([b.shown() for b in blocks], ["trig 3", "trig 4 all"])
+
+    def test_script_genre_is_refused(self):
+        self.bad('DEF BAD\n  IN TRIG 3 SCRIPT:\n    A TRIG.STEP\n', 2,
+                 "in trig t script: is not available in 1.1: use in trig t: or in trig t all:")
+
+    def test_track_bounds_and_duplicates(self):
+        self.bad('DEF BAD\n  IN TRIG 9:\n    A 1\n', 2, "in trig: track must be 1..8 (got 9)")
+        self.bad('DEF BAD\n  IN TRIG 0:\n    A 1\n', 2, "in trig: track must be 1..8 (got 0)")
+        self.bad('DEF BAD\n  IN TRIG:\n    A 1\n', 2, "in trig expects a track: in trig t [all]:")
+        self.bad('DEF BAD\n  IN TRIG 3:\n    A 1\n  IN TRIG 3:\n    B 2\n', 4, "duplicate in trig 3")
+        self.bad('DEF BAD\n  IN TRIG 3 ALL:\n    A 1\n  IN TRIG 3 ALL:\n    B 2\n', 4,
+                 "duplicate in trig 3 all")
+        # the genres of one track are distinct blocks
+        self.good('DEF OK\n  IN TRIG 3:\n    A TRIG.HIT\n  IN TRIG 3 ALL:\n    B TRIG.HIT\n')
+
+    def test_event_words_are_scoped_to_their_block(self):
+        self.bad('DEF BAD\n  A TRIG.STEP\n', 2, "trig.step only allowed in an in trig block")
+        self.bad('DEF BAD\n  A TRIG.HIT\n', 2, "trig.hit only allowed in an in trig or in trig all block")
+        self.bad('DEF BAD\n  A TRIG.VAL\n', 2, "trig.val only allowed in an in trig script block")
+        self.bad('DEF BAD\n  IN CLOCK 24:\n    A TRIG.STEP\n', 3, "trig.step only allowed in an in trig block")
+        self.bad('DEF BAD\n  IN TRIG 3 ALL:\n    A TRIG.VAL\n', 3,
+                 "trig.val only allowed in an in trig script block")
+        self.bad('DEF BAD\n  IN NOTE:\n    A TRIG.STEP\n', 3, "trig.step only allowed in an in trig block")
+
+    def test_unknown_genre_word_refused(self):
+        self.bad('DEF BAD\n  IN TRIG 3 LOUD:\n    A 1\n', 2, "unexpected")
+
+
 if __name__ == "__main__":
     unittest.main()
+

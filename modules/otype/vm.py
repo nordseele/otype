@@ -140,7 +140,7 @@ class VMRun(sim.Run):
         """STR and LIST arguments reach the stack as pool offsets: bring them back."""
         out = []
         for k, v in zip(kinds, vals):
-            if k == O.STR:
+            if k in (O.STR, O.NAME):
                 out.append(self.pool.string(v))
             elif k == O.LIST:
                 out.append(tuple(self.pool.list(v)))
@@ -159,6 +159,22 @@ class VMRun(sim.Run):
             x = fr.locals[v]
         elif v < 8:
             x = self.globals["XYZT"[v - 4]]
+        elif v >= 16:
+            slot = v - 16
+            st = self.fn_vars.setdefault(fr.fn, {})
+            if slot not in st:
+                fn_key = O.show(getattr(fr.fn, "name", fr.fn))
+                saved = getattr(self, "saved_vars", {}).get(fn_key)
+                if saved is None:
+                    saved = getattr(self, "saved_vars", {}).get(str(getattr(fr.fn, "name", fr.fn)).upper(), {})
+                if slot in saved:
+                    st[slot] = saved[slot]
+                elif str(slot) in saved:
+                    st[slot] = saved[str(slot)]
+                else:
+                    init_val = fr.fn.vars[slot] if hasattr(fr.fn, "vars") and slot < len(fr.fn.vars) else 0
+                    st[slot] = init_val
+            x = st[slot]
         else:
             x = fr.i if v == 8 else fr.j
         self.push(fr, x)
@@ -167,6 +183,19 @@ class VMRun(sim.Run):
         x = self.pop(fr)
         if v < 4:
             fr.locals[v] = x
+        elif v >= 16:
+            slot = v - 16
+            st = self.fn_vars.setdefault(fr.fn, {})
+            if slot not in st:
+                fn_key = O.show(getattr(fr.fn, "name", fr.fn))
+                saved = getattr(self, "saved_vars", {}).get(fn_key)
+                if saved is None:
+                    saved = getattr(self, "saved_vars", {}).get(str(getattr(fr.fn, "name", fr.fn)).upper(), {})
+                if slot in saved:
+                    st[slot] = saved[slot]
+                elif str(slot) in saved:
+                    st[slot] = saved[str(slot)]
+            st[slot] = max(-32768, min(32767, x))
         else:
             self.globals["XYZT"[v - 4]] = x
 
@@ -300,6 +329,46 @@ class VMRun(sim.Run):
     def i_skip(self, fr, k, off):
         if self._counter(fr, k, self.pop(fr)):
             fr.pc = off
+
+    def i_jnev(self, fr, kind, ch, num, off):
+        ev = getattr(self, "current_event", None)
+        match = False
+        if ev is None:
+            match = True
+        else:
+            etype = ev.get("type") if isinstance(ev, dict) else None
+            if kind == 1 and etype == "CLOCK":
+                match = True
+            elif kind == 2 and etype == "NOTE":
+                if ch == 0 or ch == 255 or ev.get("ch") == ch:
+                    match = True
+            elif kind == 3 and etype == "CC":
+                ch_ok = (ch == 0 or ch == 255 or ev.get("ch") == ch)
+                num_ok = (num == 255 or ev.get("num") == num)
+                if ch_ok and num_ok:
+                    match = True
+            elif kind == 4 and etype == "TRIG":
+                # num is the block's genre: 0 = plays only, 1 = every trig placed, 2 = a script trig
+                g = ev.get("trig.genre", 0)
+                if ev.get("track") == ch:
+                    if num == 2:
+                        match = g == 2
+                    elif num == 1:
+                        match = g == 0
+                    else:
+                        match = g == 0 and ev.get("trig.hit") == 1
+        if not match:
+            fr.pc = off
+
+    def i_jngt(self, fr, off, out, target):
+        """The guard of an `in gate NAME n:` block: a GATE event from NAME on output n.
+        With no event the block does not run (the C VM's OTC_EV_GATE check); unlike jnev."""
+        ev = getattr(self, "current_event", None)
+        name = self.pool.string(off)
+        if isinstance(ev, dict) and ev.get("type") == "GATE" \
+                and ev.get("gate.name") == name and ev.get("gate.out") == out:
+            return
+        fr.pc = target
 
     # ---- the loops: the only backward jumps ----------------------------------------------
     def _frame(self, fr, kind, end):
@@ -445,3 +514,11 @@ def run_vm(prog, func, **kw):
         why = "; ".join(str(d) for d in c.diags if d.func == O.show(name))
         raise sim.SimError("%s is not in the compiled table (%s)" % (O.show(name), why))
     return simulate_otb(table, func, **kw)
+
+
+def simulate_otb_module(table, func, total_ticks, **kw):
+    """`sim.simulate_module` on the table via VMRun."""
+    if isinstance(table, (bytes, bytearray)):
+        table = otb.parse(table)
+    return sim.simulate_module(OtbProgram(table), func, total_ticks, run_class=VMRun, **kw)
+

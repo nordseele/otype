@@ -36,19 +36,27 @@ PARAM_INT = "INT"
 PARAM_BOOL = "BOOL"
 PARAM_OPTION = "OPTION"
 PARAM_FOLDER = "FOLDER"
+CH = "CH"          # expression, 1..16
+VAL7 = "VAL7"      # expression, 0..127
+VAL14 = "VAL14"    # expression, 0..16383 (a 14-bit MIDI number: NRPN parameter / value)
+DUR = "DUR"        # expression, 1..32767
+OUT = "OUT"        # expression, 1..4 (a module output)
+NAME = "NAME"      # a user function name, written bare (`cv acid 1`) and <= 8 characters
 
-NUMERIC_KINDS = (INT, STEP, TRACK, SLOT, PARAM, VALUE, PCT, FILE)
+NUMERIC_KINDS = (INT, STEP, TRACK, SLOT, PARAM, VALUE, PCT, FILE, CH, VAL7, VAL14, DUR, OUT)
 # constant ranges checked at load time (spec 8.1)
-RANGES = {STEP: (1, 64), TRACK: (1, 8), SLOT: (1, 128), PARAM: (0, 29), PCT: (0, 100)}
+RANGES = {STEP: (1, 64), TRACK: (1, 8), SLOT: (1, 128), PARAM: (0, 29), PCT: (0, 100),
+          CH: (1, 16), VAL7: (0, 127), VAL14: (0, 16383), DUR: (1, 32767), OUT: (1, 4)}
 
 
 class Param(tuple):
     """Parameter specification: tuple of (default, min, max) + typed attributes."""
-    def __new__(cls, d, lo, hi, kind="INT", labels=None, path=None):
+    def __new__(cls, d, lo, hi, kind="INT", labels=None, path=None, src=None):
         inst = super().__new__(cls, (d, lo, hi))
         inst.kind = kind
         inst.labels = tuple(labels) if labels else ()
         inst.path = path
+        inst.src = src
         return inst
 
     @property
@@ -64,6 +72,8 @@ class Param(tuple):
         return self[2]
 
     def __repr__(self):
+        if self.src:
+            return "Param(%d, %d, %d, src=%r)" % (self[0], self[1], self[2], self.src)
         if self.kind == "INT":
             return "Param(%d, %d, %d)" % (self[0], self[1], self[2])
         if self.kind == "BOOL":
@@ -73,6 +83,7 @@ class Param(tuple):
         if self.kind == "FOLDER":
             return "Param.folder(%s)" % (self.path,)
         return super().__repr__()
+
 
 
 
@@ -135,7 +146,7 @@ TRAC, PART, SLOTS, NONE = "TRAC", "PART", "SLOTS", "NONE"
 NAMESPACES = {"LANG": 0, "CTX": 1, "READ": 2, "TR": 3, "TL": 4, "PL": 5,
               "SMP": 6, "COND": 7, "MICRO": 8, "PART": 9, "PRM": 10,
               "FILE": 11, "SLOT": 12, "POOL": 13, "UI": 14, "RHYTHM": 15, "STATE": 16,
-              "AUDIO": 17}
+              "AUDIO": 17, "MODULE": 18}
 
 
 @dataclass(frozen=True)
@@ -162,6 +173,7 @@ class Op:
     settable: bool = False  # "NAME value" at the start of a statement SETS it
     stream: object = None  # random stream drawn from (STREAMS) or None
     argnames: tuple = ()   # short argument names for the manual
+    menu_only: bool = False  # refused in a live script (its confirmation cannot be asked there)
 
     def signature(self):
         """`pl.set s p v` -- the name and short argument letters (lower case)."""
@@ -179,13 +191,15 @@ class Op:
 
 # ---- manual metadata -------------------------------------------------------
 CATEGORIES = ("LANG", "CONTEXT", "PATTERN", "PARTS", "TRIGS", "TIMING", "TRACK", "PAGES",
-              "LOCKS", "SMP", "SCENES", "FILES", "SLOTS", "AUDIO", "UI")
+              "LOCKS", "SMP", "SCENES", "FILES", "SLOTS", "AUDIO", "UI", "MODULES")
 STREAMS = ("RAND", "TOSS", "PROB", "DRUNK", "FILE")
 # random streams drawn by language MODIFIERS (they are keywords, not registry entries)
 MODIFIER_STREAMS = {"PROB": "PROB"}
 
 _LETTERS = {STEP: "s", TRACK: "t", SLOT: "n", PARAM: "p", VALUE: "v", COND: "c", PCT: "pct",
-            FILE: "f", STR: "str", LIST: "list", TRACKS: "t...", STEPSEL: "all|a b|pred"}
+            FILE: "f", STR: "str", LIST: "list", TRACKS: "t...", STEPSEL: "all|a b|pred",
+            OUT: "n", NAME: "name",
+            CH: "ch", VAL7: "v", VAL14: "v", DUR: "dur"}
 
 
 def _arg_letters(o):
@@ -234,6 +248,10 @@ _PROVEN = frozenset(n.upper() for n in """
     pl.set pl.get pl.del pl.rnd pl.clr smp.set smp.get smp.del smp.rnd smp.clr micro.set
     micro.rnd par.set lfo.dest fx.type scn.clr trk.init dir
     static.load static.free static.firstfree static.clr
+    play
+    send.note send.cc send.prog send.nrpn midi.cc midi.note midi.vel
+    rt.add rt.del rt.clr rt.src ro.add rec.src rec.len rec.trig rec.loop rec.arm
+    pat.copy gate out cv
     """.split())
 _TO_ESTABLISH = frozenset(n.upper() for n in """
     trk.type trk.slot tempo
@@ -245,10 +263,13 @@ _TO_ESTABLISH = frozenset(n.upper() for n in """
     trk.level trk.cue trk.mute
     par.get par.min par.max fx.count static.swap pb.setup amp.setup lfo.wave lfo.mult lfo.trig lfod.set lfod.get lfod.interp fx1.setup fx2.setup
     scn.set scn.get scn.del scn.copy msg
-    src.save flex.load flex.free flex.firstfree flex.del cat.clr cat.add cat.save norm""".split())
+    src.save flex.load flex.free flex.firstfree flex.del cat.clr cat.add cat.save norm
+    seq.run seq.step seq.mute nx.smp nx.pl ro.del""".split())
 _VM_ONLY = frozenset(n.upper() for n in """
     step.cur ext match file.len file.rnd file.pick file.at slots.clr slots.add slots.rnd
-    lfo.spd lfo.dep""".split())
+    lfo.spd lfo.dep
+    note.num note.vel note.ch cc.num cc.val cc.ch trig.step trig.hit trig.val""".split())
+
 
 
 def _default_level(name, family):
@@ -269,7 +290,7 @@ _IDS = {}
 def op(name, ns, num, args=(), ret=None, cost=4, family=EDIT, destructive=False,
        touches=NONE, predicate=False, stmt_only=False, core=None, since=1,
        level=None, aliases=(), value=None, lazy=False,
-       doc="", category="", settable=False, stream=None, argnames=()):
+       doc="", category="", settable=False, stream=None, argnames=(), menu_only=False):
     name = name.upper()
     if not doc.strip():
         raise ValueError("op %s: missing doc" % name)
@@ -290,7 +311,7 @@ def op(name, ns, num, args=(), ret=None, cost=4, family=EDIT, destructive=False,
     entry = Op(name, ns, ident, tuple(args), ret, cost, family, destructive, touches,
                predicate, stmt_only, core, since, level,
                tuple(a.upper() for a in aliases), value, lazy, doc.strip(), category,
-               settable, stream, tuple(argnames))
+               settable, stream, tuple(argnames), menu_only)
     for n in (name,) + entry.aliases:
         if n in OPS:
             raise ValueError("duplicate op name %s" % n)
@@ -308,7 +329,7 @@ _lang("ADD", 0x01, (INT, INT), "add x and y", aliases=("+",), argnames=("x", "y"
 _lang("SUB", 0x02, (INT, INT), "subtract y from x", aliases=("-",), argnames=("x", "y"))
 _lang("MUL", 0x03, (INT, INT), "multiply x by y", aliases=("*",), argnames=("x", "y"))
 _lang("DIV", 0x04, (INT, INT), "divide x by y (0 if y is 0)", aliases=("/",), argnames=("x", "y"))
-_lang("MOD", 0x05, (INT, INT), "remainder of x / y, never negative (0 if y is 0)", argnames=("x", "y"))
+_lang("MOD", 0x05, (INT, INT), "remainder of x / y, never negative (0 if y is 0)", aliases=("%",), argnames=("x", "y"))
 _lang("MIN", 0x06, (INT, INT), "the smaller of x and y", argnames=("x", "y"))
 _lang("MAX", 0x07, (INT, INT), "the larger of x and y", argnames=("x", "y"))
 _lang("ABS", 0x08, (INT,), "absolute value of x", argnames=("x",))
@@ -398,6 +419,10 @@ op("BANK.CUR", "READ", 0x06, (), ret=INT, cost=2, family=IO_R, category="PATTERN
    doc="active bank number (1..16)")
 op("PAT.GO", "PART", 0x0B, (INT, OPT_INT(0)), cost=32, family=EDIT, touches=NONE, category="PATTERN",
    doc="change to pattern p (1..16) and optional bank b (1..16)", argnames=("p", "[b]"))
+op("PAT.COPY", "PART", 0x25, (INT, INT), cost=128, family=EDIT, destructive=True, touches=TRAC,
+   category="PATTERN", menu_only=True,
+   doc="copy pattern a (1..16) onto pattern b (1..16) of the current bank, with its undo; the pattern clipboard is untouched",
+   argnames=("a", "b"))
 op("TEMPO", "PART", 0x0A, (), ret=INT, cost=2, family=IO_R, touches=PART, category="PATTERN", settable=True,
    doc="active tempo in BPM; tempo x sets it")
 
@@ -452,6 +477,19 @@ op("SL.DEL", "TR", 0x0E, (STEP,), touches=TRAC, category="TRIGS",
    doc="remove the slide trig on step s")
 op("SL.FLIP", "TR", 0x0F, (STEP,), touches=TRAC, category="TRIGS",
    doc="toggle the slide trig on step s")
+op("RT.ADD", "TR", 0x11, (STEP, OPT_INT(7)), touches=TRAC, category="TRIGS",
+   doc="add a recorder trig on step s with source mask src (1 AB, 2 CD, 4 internal, 1..7; default 7)", argnames=("s", "[src]"))
+op("RT.DEL", "TR", 0x12, (STEP,), touches=TRAC, category="TRIGS",
+   doc="remove the recorder trig on step s (sources, one-shot flag and micro-timing)", argnames=("s",))
+op("RT.CLR", "TR", 0x13, (), cost=128, destructive=True, touches=TRAC, category="TRIGS",
+   doc="remove every recorder trig of the current steps (as rt.del)")
+op("RT.SRC", "TR", 0x14, (STEP, INT), touches=TRAC, category="TRIGS",
+   doc="set the source mask v (1 AB, 2 CD, 4 internal, 1..7) of the recorder trig on step s", argnames=("s", "v"))
+op("RO.ADD", "TR", 0x15, (STEP, OPT_INT(7)), touches=TRAC, category="TRIGS",
+   doc="add a ONE SHOT recorder trig on step s with source mask src (1 AB, 2 CD, 4 internal, 1..7; default 7)",
+   argnames=("s", "[src]"))
+op("RO.DEL", "TR", 0x16, (STEP,), touches=TRAC, category="TRIGS",
+   doc="remove the recorder trig on step s, one shot or not (sources, one-shot flag and micro-timing)", argnames=("s",))
 op("TRK.SWING", "TR", 0x10, (), ret=INT, cost=2, family=IO_R, touches=TRAC, category="TRACK", settable=True,
    doc="swing amount 50..80 percent on context tracks; trk.swing x sets it")
 
@@ -490,6 +528,19 @@ op("TRK.CUE", "PART", 0x11, (), ret=INT, cost=2, family=IO_R, touches=PART, cate
    doc="track CUE level (0..127); trk.cue x sets it")
 op("TRK.MUTE", "PART", 0x12, (), ret=INT, cost=2, family=IO_R, touches=PART, category="TRACK", settable=True,
    doc="track mute status (1 = muted, 0 = active); trk.mute x sets it")
+op("REC.SRC", "PART", 0x20, (TRACK, INT, INT), touches=PART, category="TRACK",
+   doc="set recorder input source n (1 INAB, 2 INCD, 3 SRC3) to stock value v on track t "
+       "(INAB/INCD 0 - 1 A B/C D 2 A/C 3 B/D 4 A+B/C+D; SRC3 0 - 1..8 T1..T8 9 MAIN 10 CUE)",
+   argnames=("t", "n", "v"))
+op("REC.LEN", "PART", 0x21, (TRACK, INT), touches=PART, category="TRACK",
+   doc="set recorder length RLEN to v steps (1..63) or MAX (64) on track t", argnames=("t", "v"))
+op("REC.TRIG", "PART", 0x22, (TRACK, INT), touches=PART, category="TRACK",
+   doc="set the recorder TRIG mode of track t: 0 ONE, 1 ONE-2, 2 HOLD", argnames=("t", "v"))
+op("REC.LOOP", "PART", 0x23, (TRACK, INT), touches=PART, category="TRACK",
+   doc="set recorder LOOP of track t: 0 off, 1 on (the captured sample loops when played back)", argnames=("t", "v"))
+op("REC.ARM", "PART", 0x24, (TRACK, OPT_INT(7)), family=EDIT, stmt_only=True, touches=PART, category="TRACK",
+   doc="start recording on track t now, sources src (1 AB, 2 CD, 4 SRC3, 1..7; default 7); QREC is honoured",
+   argnames=("t", "[src]"))
 
 # ---- 8. PAGES --------------------------------------------------------------
 op("PAR.SET", "PART", 0x01, (PARAM, VALUE), touches=PART, category="PAGES",
@@ -640,6 +691,67 @@ op("TRK.INIT", "PART", 0x08, (), cost=128, destructive=True, touches=PART, categ
 op("MSG", "UI", 0x01, (REST(ITEM),), family=UI, stmt_only=True, category="UI",
    doc="end box text instead of DONE: strings and numbers (decimal), space-separated; the last msg of the run is shown",
    argnames=("item...",))
+
+# ---- 15. MODULES -----------------------------------------------------------
+op("PLAY", "MODULE", 0x01, (TRACK,), stmt_only=True, category="MODULES",
+   doc="schedule track t to play at the current block's tick of the live script", argnames=("t",))
+op("SEQ.RUN", "MODULE", 0x02, (), ret=INT, cost=2, family=IO_R, category="MODULES",
+   doc="1 if sequencer is running, 0 if stopped")
+op("SEQ.STEP", "MODULE", 0x03, (TRACK,), ret=INT, cost=2, family=IO_R, category="MODULES",
+   doc="current playing step of track t (1..64)", argnames=("t",))
+op("SEQ.MUTE", "MODULE", 0x04, (TRACK,), ret=INT, cost=2, family=IO_R, category="MODULES",
+   doc="1 if track t is muted, 0 if active", argnames=("t",))
+op("NX.SMP", "MODULE", 0x05, (SLOT,), stmt_only=True, category="MODULES",
+   doc="lock Static sample slot n (1..128) on the next play hit of this live script", argnames=("n",))
+op("NX.PL", "MODULE", 0x06, (PARAM, VALUE), stmt_only=True, category="MODULES",
+   doc="lock parameter p (0..29) to v (clamped to p's range) on the next play hit of this live script", argnames=("p", "v"))
+op("NOTE.NUM", "MODULE", 0x10, (), ret=INT, cost=1, family=IO_R, category="MODULES",
+   doc="note number of the current note event (0..127)")
+op("NOTE.VEL", "MODULE", 0x11, (), ret=INT, cost=1, family=IO_R, category="MODULES",
+   doc="velocity of the current note event (0..127)")
+op("NOTE.CH", "MODULE", 0x12, (), ret=INT, cost=1, family=IO_R, category="MODULES",
+   doc="MIDI channel of the current note event (1..16)")
+op("CC.NUM", "MODULE", 0x13, (), ret=INT, cost=1, family=IO_R, category="MODULES",
+   doc="controller number of the current CC event (0..127)")
+op("CC.VAL", "MODULE", 0x14, (), ret=INT, cost=1, family=IO_R, category="MODULES",
+   doc="value of the current CC event (0..127)")
+op("CC.CH", "MODULE", 0x15, (), ret=INT, cost=1, family=IO_R, category="MODULES",
+   doc="MIDI channel of the current CC event (1..16)")
+op("TRIG.STEP", "MODULE", 0x19, (), ret=INT, cost=1, family=IO_R, category="MODULES",
+   doc="step (1..64) of the current trig event")
+op("TRIG.HIT", "MODULE", 0x1A, (), ret=INT, cost=1, family=IO_R, category="MODULES",
+   doc="1 if the current trig plays, 0 if its condition failed or the track is muted")
+op("TRIG.VAL", "MODULE", 0x1B, (), ret=INT, cost=1, family=IO_R, category="MODULES",
+   doc="value (0..255) carried by a script trig (coming in 1.2)")
+op("MIDI.CC", "MODULE", 0x16, (CH, VAL7), ret=INT, cost=2, family=IO_R, category="MODULES",
+   doc="last value (0..127) of controller n received on MIDI channel ch (0 if none since power on)",
+   argnames=("ch", "n"))
+op("MIDI.NOTE", "MODULE", 0x17, (CH,), ret=INT, cost=1, family=IO_R, category="MODULES",
+   doc="last note number (0..127) received on MIDI channel ch (0 if none since power on)", argnames=("ch",))
+op("MIDI.VEL", "MODULE", 0x18, (CH,), ret=INT, cost=1, family=IO_R, category="MODULES",
+   doc="velocity of the last note received on MIDI channel ch (0 if none since power on)", argnames=("ch",))
+op("SEND.NOTE", "MODULE", 0x20, (CH, VAL7, VAL7, DUR), stmt_only=True, family=IO_W, category="MODULES",
+   doc="send MIDI note on channel ch (1..16), note n (0..127), velocity vel (0..127), duration dur (>= 1 clock ticks)",
+   argnames=("ch", "n", "vel", "dur"))
+op("SEND.CC", "MODULE", 0x21, (CH, VAL7, VAL7), stmt_only=True, family=IO_W, category="MODULES",
+   doc="send MIDI Control Change on channel ch (1..16), cc n (0..127), value v (0..127)",
+   argnames=("ch", "n", "v"))
+op("SEND.PROG", "MODULE", 0x22, (CH, VAL7), stmt_only=True, family=IO_W, category="MODULES",
+   doc="send MIDI Program Change on channel ch (1..16), program p (0..127)",
+   argnames=("ch", "p"))
+op("SEND.NRPN", "MODULE", 0x23, (CH, VAL14, VAL14), stmt_only=True, family=IO_W, category="MODULES",
+   doc="send NRPN p (0..16383) = v (0..16383) on channel ch (1..16) as CC 99, 98, 6, 38; either all four go out or none",
+   argnames=("ch", "p", "v"))
+op("GATE", "MODULE", 0x24, (OUT,), stmt_only=True, family=IO_W, cost=2, category="MODULES",
+   doc="emit a gate on output n (1..4) at the current block's tick; the live scripts whose `in gate NAME n` names this one run in the same pass",
+   argnames=("n",))
+op("OUT", "MODULE", 0x25, (OUT, INT), stmt_only=True, family=IO_W, cost=1, category="MODULES",
+   doc="publish value v on output n (1..4), held until it changes; `cv NAME n` reads it",
+   argnames=("n", "v"))
+op("CV", "MODULE", 0x26, (NAME, OUT), ret=INT, cost=2, family=IO_R, category="MODULES",
+   doc="the value published on output n (1..4) by the running script named NAME (0 if it is not running)",
+   argnames=("name", "n"))
+
 
 _unknown = (_PROVEN | _TO_ESTABLISH | _VM_ONLY) - set(OPS)
 if _unknown:

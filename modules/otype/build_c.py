@@ -28,7 +28,17 @@ ALLOWED_UNDEF = {"otb_host_add", "otb_host_dir_open", "otb_host_dir_next", "otb_
                  "otb_host_fx_count", "otb_host_fx_default", "otb_host_fx_set", "otb_host_scene_put",
                  "otb_host_trk_slot_init", "otb_host_trk_slot", "otb_host_tempo",     # the part writes / tempo (c/otc_vm.h)
                  "otb_host_audio_input", "otb_host_src_save", "otb_host_flex_load", "otb_host_flex_free", "otb_host_flex_del",
-                 "otb_host_cat_clr", "otb_host_cat_add", "otb_host_cat_save", "otb_host_norm"}  # audio
+                 "otb_host_cat_clr", "otb_host_cat_add", "otb_host_cat_save", "otb_host_norm",  # audio
+                 "otb_host_module_play", "otb_host_seq_run", "otb_host_seq_step", "otb_host_seq_mute",  # module / sequencer
+                 "otb_host_note_num", "otb_host_note_vel", "otb_host_note_ch",
+                 "otb_host_cc_num", "otb_host_cc_val", "otb_host_cc_ch",
+                 "otb_host_trig_track", "otb_host_trig_step", "otb_host_trig_hit", "otb_host_trig_val",
+                 "otb_host_trig_genre",
+                 "otb_host_cur_ev_type",
+                 "otb_host_gate", "otb_host_out", "otb_host_cv", "otb_host_gate_out", "otb_host_cur_ev_name",
+                 "otb_host_gate_ran", "otb_host_gate_defer",
+                 "otb_host_send_note", "otb_host_send_cc", "otb_host_send_prog", "otb_host_send_nrpn",
+                 "otb_host_midi_cc", "otb_host_midi_note", "otb_host_midi_vel"}
 CFLAGS = ["-mcfv4e", "-Os", "-ffreestanding", "-fno-builtin", "-fno-common",
           "-fomit-frame-pointer", "-fno-asynchronous-unwind-tables", "-fno-unwind-tables",
           "-fno-stack-protector", "-nostdlib", "-Wall", "-Wextra", "-Werror",

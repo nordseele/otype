@@ -24,6 +24,8 @@ enum {
     I_PUSH8 = 0x10, I_PUSH16 = 0x11, I_PUSHK = 0x12, I_PUSHC = 0x13, I_LD = 0x14, I_LDA = 0x15,
     I_LDP = 0x16, I_ST = 0x17, I_DROP = 0x18, I_OP = 0x30, I_OPV = 0x31, I_SET = 0x32,
     I_JMP = 0x40, I_JZ = 0x41, I_SEL = 0x42, I_PROB = 0x43, I_EVERY = 0x44, I_SKIP = 0x45,
+    I_JNEV = 0x46,
+    I_JNGT = 0x47,
     I_LBEG = 0x50, I_LNEXT = 0x51, I_EBEG = 0x52, I_ENEXT = 0x53, I_PASS = 0x54, I_PNEXT = 0x55,
     I_BREAK = 0x56, I_CALL = 0x60, I_RET = 0x61, I_STOP = 0x62, I_SCOPE = 0x70, I_UNSCOPE = 0x71,
     I_DIR = 0x80, I_EXT = 0x81, I_MATCH = 0x82, I_MSG = 0x83
@@ -886,6 +888,30 @@ static void edit_step(otc_vm_t *vm, const otc_frame_t *fr, const otc_ctx_t *ctx,
         blk_bitput(vm, t, mask, s, on);
         break;
     }
+    case OTC_H_RT_ADD:
+    case OTC_H_RO_ADD: {
+        int32_t src = v[1];
+        blk_bitput(vm, t, 0x20, s, (src & 1) != 0);
+        blk_bitput(vm, t, 0x28, s, (src & 2) != 0);
+        blk_bitput(vm, t, 0x30, s, (src & 4) != 0);
+        if (h == OTC_H_RO_ADD)
+            blk_bitput(vm, t, 0x38, s, 1);          /* ONE SHOT: the recorder trig records once */
+        break;
+    }
+    case OTC_H_RT_DEL:
+    case OTC_H_RO_DEL:
+    case OTC_H_RT_CLR:
+        blk_bitput(vm, t, 0x20, s, 0);              /* AB */
+        blk_bitput(vm, t, 0x28, s, 0);              /* CD */
+        blk_bitput(vm, t, 0x30, s, 0);              /* SRC3 */
+        blk_bitput(vm, t, 0x38, s, 0);              /* one-shot, as the stock writer's release */
+        blk_put(vm, t, 0x859 + (uint32_t)(s - 1), 0);   /* the recorder micro-timing byte */
+        break;
+    case OTC_H_RT_SRC:
+        blk_bitput(vm, t, 0x20, s, (v[1] & 1) != 0);
+        blk_bitput(vm, t, 0x28, s, (v[1] & 2) != 0);
+        blk_bitput(vm, t, 0x30, s, (v[1] & 4) != 0);
+        break;
     case OTC_H_COND_DEL:
         if (lands(vm, fr, op, t, s))
             word_cond(vm, t, s, 0);
@@ -954,15 +980,22 @@ static int track_op(otc_vm_t *vm, otc_frame_t *fr, const otc_op_t *op, const int
     case OTC_H_TL_DEL: case OTC_H_TT_ADD: case OTC_H_TT_DEL: case OTC_H_OS_ADD: case OTC_H_OS_DEL:
     case OTC_H_SW_ADD: case OTC_H_SW_DEL: case OTC_H_SW_FLIP:
     case OTC_H_SL_ADD: case OTC_H_SL_DEL: case OTC_H_SL_FLIP: case OTC_H_COND_DEL:
+    case OTC_H_RT_ADD: case OTC_H_RT_DEL: case OTC_H_RT_SRC:
+    case OTC_H_RO_ADD: case OTC_H_RO_DEL:
         per_step = 0;
         break;
     case OTC_H_TR_CLR: case OTC_H_SMP_RND: case OTC_H_SMP_CLR:
     case OTC_H_PL_RND: case OTC_H_PL_VARY: case OTC_H_PL_CLR: case OTC_H_TL_FILL:
     case OTC_H_COND_RND: case OTC_H_MICRO_RND:                                    /* trig-word ops */
+    case OTC_H_RT_CLR:
         per_step = 1;
         break;
     default:
         return -1;
+    }
+    if ((h == OTC_H_RT_ADD || h == OTC_H_RO_ADD || h == OTC_H_RT_SRC) && (v[1] < 1 || v[1] > 7)) {
+        oor(vm, fr, op);                          /* sim: a recorder trig always listens to something */
+        return 0;
     }
     for (k = 0; k < ctx->ntr; k++) {
         t = ctx->tr[k];
@@ -2246,6 +2279,10 @@ static int control_op(otc_vm_t *vm, otc_frame_t *fr, const otc_op_t *op, const i
         val = v[1] ? v[1] : otb_host_control_read(OTC_H_BANK_CUR, 0, 0);
         if (v[0] < 1 || v[0] > 16 || val < 1 || val > 16) { oor(vm, fr, op); return 0; }
         return otb_host_control_action(vm, h, v[0], val);
+    case OTC_H_PAT_COPY:
+        if (v[0] < 1 || v[0] > 16 || v[1] < 1 || v[1] > 16) { oor(vm, fr, op); return 0; }
+        if (v[0] == v[1]) return OTC_E_ARG;          /* copying a pattern onto itself is refused (nothing written) */
+        return otb_host_control_action(vm, h, v[0], v[1]);
     case OTC_H_PART_GO: case OTC_H_PART_SAVE: case OTC_H_PART_RELOAD:
         val = v[0] ? v[0] : otb_host_control_read(OTC_H_PART_CUR, 0, 0);
         if (val < 1 || val > 4) { oor(vm, fr, op); return 0; }
@@ -2255,6 +2292,13 @@ static int control_op(otc_vm_t *vm, otc_frame_t *fr, const otc_op_t *op, const i
     case OTC_H_OS_ARM:
         for (k = 0; k < ctx->ntr; k++)
             TRY(otb_host_control_action(vm, h, ctx->tr[k] - 1, 0));
+        return 0;
+    case OTC_H_REC_ARM:
+        if (v[0] < 1 || v[0] > 8 || v[1] < 1 || v[1] > 7) {
+            oor(vm, fr, op);                                         /* a recorder always listens to something */
+            return 0;
+        }
+        TRY(otb_host_control_action(vm, h, v[0] - 1, v[1]));
         return 0;
     case OTC_H_LFOD_SET: case OTC_H_LFOD_INTERP:
         if (!control_index(h, n)) { oor(vm, fr, op); return 0; }
@@ -2287,6 +2331,29 @@ static int control_op(otc_vm_t *vm, otc_frame_t *fr, const otc_op_t *op, const i
             }
             part_mark(vm, t);
         }
+        return 0;
+    case OTC_H_REC_SRC:
+        if (v[0] < 1 || v[0] > 8 || v[1] < 1 || v[1] > 3) { oor(vm, fr, op); return 0; }
+        if (v[1] == 1 && (v[2] < 0 || v[2] > 4)) { oor(vm, fr, op); return 0; }
+        if (v[1] == 2 && (v[2] < 0 || v[2] > 4)) { oor(vm, fr, op); return 0; }
+        if (v[1] == 3 && (v[2] < 0 || v[2] > 10)) { oor(vm, fr, op); return 0; }
+        otb_host_control_write(h, (uint32_t)(v[0] - 1), (uint32_t)v[1], v[2]);
+        part_mark(vm, (unsigned)v[0]);
+        return 0;
+    case OTC_H_REC_LEN:
+        if (v[0] < 1 || v[0] > 8 || v[1] < 1 || v[1] > 64) { oor(vm, fr, op); return 0; }
+        otb_host_control_write(h, (uint32_t)(v[0] - 1), 0, v[1]);
+        part_mark(vm, (unsigned)v[0]);
+        return 0;
+    case OTC_H_REC_TRIG:
+        if (v[0] < 1 || v[0] > 8 || v[1] < 0 || v[1] > 2) { oor(vm, fr, op); return 0; }
+        otb_host_control_write(h, (uint32_t)(v[0] - 1), 0, v[1]);
+        part_mark(vm, (unsigned)v[0]);
+        return 0;
+    case OTC_H_REC_LOOP:
+        if (v[0] < 1 || v[0] > 8 || v[1] < 0 || v[1] > 1) { oor(vm, fr, op); return 0; }
+        otb_host_control_write(h, (uint32_t)(v[0] - 1), 0, v[1]);
+        part_mark(vm, (unsigned)v[0]);
         return 0;
     default:
         return -1;
@@ -2358,6 +2425,98 @@ static int call_op(otc_vm_t *vm, otc_frame_t *fr, const otc_op_t *op, int32_t *v
         return 0;
     case OTC_H_STEP_CUR:
         *r = ctx->step;
+        return 0;
+    case OTC_H_PLAY:
+        otb_host_module_play((uint32_t)(v[0] - 1), vm->nx_locks);
+        for (i = 0; i < 32; i++)
+            vm->nx_locks[i] = 0xFF;
+        return 0;
+    case OTC_H_NX_SMP:
+        vm->nx_locks[31] = (uint8_t)(v[0] - 1);
+        return 0;
+    case OTC_H_NX_PL: {
+        int32_t lo = 0, hi = 0;
+        if (lock_range(vm, fr, op, (unsigned)cur_track(vm, ctx), v[0], &lo, &hi))
+            vm->nx_locks[v[0]] = (uint8_t)clampv(v[1], lo, hi);
+        return 0;
+    }
+    case OTC_H_GATE:
+        otb_host_gate((uint32_t)v[0]);
+        return 0;
+    case OTC_H_OUT:
+        otb_host_out((uint32_t)v[0], v[1]);
+        return 0;
+    case OTC_H_CV: {                                /* v[0] = pool offset of the name, v[1] = output */
+        uint32_t off = (uint32_t)v[0];
+        if (off + 2u > vm->pool_len) {
+            *r = 0;
+            return 0;
+        } else {
+            const uint8_t *np = vm->tab + vm->pool_off + off;
+            uint32_t len = np[1];
+            if (len > 8u || off + 2u + len > vm->pool_len)
+                *r = 0;
+            else
+                *r = otb_host_cv((const char *)(np + 2), len, (uint32_t)v[1]);
+            return 0;
+        }
+    }
+    case OTC_H_SEQ_RUN:
+        *r = (int32_t)otb_host_seq_run();
+        return 0;
+    case OTC_H_SEQ_STEP:
+        *r = (int32_t)otb_host_seq_step((uint32_t)(v[0] - 1));
+        return 0;
+    case OTC_H_SEQ_MUTE:
+        *r = (int32_t)otb_host_seq_mute((uint32_t)(v[0] - 1));
+        return 0;
+    case OTC_H_NOTE_NUM:
+        *r = (int32_t)otb_host_note_num();
+        return 0;
+    case OTC_H_NOTE_VEL:
+        *r = (int32_t)otb_host_note_vel();
+        return 0;
+    case OTC_H_NOTE_CH:
+        *r = (int32_t)otb_host_note_ch();
+        return 0;
+    case OTC_H_CC_NUM:
+        *r = (int32_t)otb_host_cc_num();
+        return 0;
+    case OTC_H_CC_VAL:
+        *r = (int32_t)otb_host_cc_val();
+        return 0;
+    case OTC_H_CC_CH:
+        *r = (int32_t)otb_host_cc_ch();
+        return 0;
+    case OTC_H_TRIG_STEP:
+        *r = (int32_t)otb_host_trig_step();
+        return 0;
+    case OTC_H_TRIG_HIT:
+        *r = (int32_t)otb_host_trig_hit();
+        return 0;
+    case OTC_H_TRIG_VAL:
+        *r = (int32_t)otb_host_trig_val();
+        return 0;
+    case OTC_H_MIDI_CC:
+        *r = (int32_t)otb_host_midi_cc((uint32_t)v[0], (uint32_t)v[1]);
+        return 0;
+    case OTC_H_MIDI_NOTE:
+        *r = (int32_t)otb_host_midi_note((uint32_t)v[0]);
+        return 0;
+    case OTC_H_MIDI_VEL:
+        *r = (int32_t)otb_host_midi_vel((uint32_t)v[0]);
+        return 0;
+    case OTC_H_SEND_NOTE:
+        otb_host_send_note((uint32_t)v[0], (uint32_t)v[1], (uint32_t)v[2], (uint32_t)v[3]);
+        return 0;
+    case OTC_H_SEND_CC:
+        otb_host_send_cc((uint32_t)v[0], (uint32_t)v[1], (uint32_t)v[2]);
+        return 0;
+    case OTC_H_SEND_PROG:
+        otb_host_send_prog((uint32_t)v[0], (uint32_t)v[1]);
+        return 0;
+    case OTC_H_SEND_NRPN:
+        otb_host_send_nrpn((uint32_t)v[0], (uint32_t)v[1], (uint32_t)v[2]);
         return 0;
     default:
         if (op->flags & OTC_OF_CARD) {              /* the workspace is bound (i_op checked) */
@@ -2433,6 +2592,12 @@ static int i_ld(otc_vm_t *vm, otc_frame_t *fr, uint32_t v)
         x = fr->loc[v];
     else if (v < 8)
         x = vm->g[v - 4];
+    else if (v >= 16) {
+        uint32_t slot = v - 16;
+        if (slot >= 16)
+            return OTC_E_TABLE;
+        x = vm->vars[slot];
+    }
     else
         x = v == 8 ? fr->i : fr->j;                 /* as vm.py: any v >= 9 reads j */
     return push(fr, x);
@@ -2441,13 +2606,21 @@ static int i_ld(otc_vm_t *vm, otc_frame_t *fr, uint32_t v)
 static int i_st(otc_vm_t *vm, otc_frame_t *fr, uint32_t v)
 {
     int32_t x;
-    if (v >= 8)
-        return OTC_E_TABLE;
     TRY(pop(fr, &x));
     if (v < 4)
         fr->loc[v] = x;
-    else
+    else if (v < 8)
         vm->g[v - 4] = x;
+    else if (v >= 16) {
+        uint32_t slot = v - 16;
+        if (slot >= 16)
+            return OTC_E_TABLE;
+        if (x < -32768) x = -32768;
+        else if (x > 32767) x = 32767;
+        vm->vars[slot] = (int16_t)x;
+    }
+    else
+        return OTC_E_TABLE;
     return 0;
 }
 
@@ -2891,6 +3064,10 @@ static uint32_t ins_size(uint32_t opc)                /* 0 = unknown opcode */
         return 3;
     case I_OPV: case I_EVERY: case I_SKIP:
         return 4;
+    case I_JNEV:
+        return 6;
+    case I_JNGT:
+        return 6;
     default:
         return 0;
     }
@@ -2927,6 +3104,64 @@ static int exec(otc_vm_t *vm, otc_frame_t *fr, uint32_t opc, const uint8_t *q)  
     case I_PROB:   return i_prob(vm, fr, rd16(q));
     case I_EVERY:  return i_every(vm, fr, q[0], rd16(q + 1), 0);
     case I_SKIP:   return i_every(vm, fr, q[0], rd16(q + 1), 1);
+    case I_JNEV: {
+        uint32_t ev = otb_host_cur_ev_type();
+        uint32_t kind = q[0], ch = q[1], num = q[2];
+        int match = 0;
+        if (ev == 0)
+            match = 1;
+        else if (kind == 1 && ev == 1)
+            match = 1;
+        else if (kind == 2 && ev == 2) {
+            if (ch == 0 || ch == 255 || otb_host_note_ch() == ch)
+                match = 1;
+        } else if (kind == 3 && ev == 3) {
+            int ch_ok = (ch == 0 || ch == 255 || otb_host_cc_ch() == ch);
+            int num_ok = (num == 255 || otb_host_cc_num() == num);
+            if (ch_ok && num_ok)
+                match = 1;
+        } else if (kind == 4 && ev == 4) {
+            /* num is the block's genre: 0 = plays only, 1 = every trig placed, 2 = a script trig */
+            int g = (int)otb_host_trig_genre();
+            int ok = (num == 2) ? (g == 2)
+                   : (num == 1) ? (g == 0)
+                   : (g == 0 && otb_host_trig_hit() == 1);
+            if (otb_host_trig_track() == ch && ok)
+                match = 1;
+        }
+        if (!match)
+            fr->pc = (uint16_t)rd16(q + 3);
+        return 0;
+    }
+    case I_JNGT: {                                  /* an `in gate NAME n:` guard: pool string + output */
+        uint32_t ev = otb_host_cur_ev_type();
+        uint32_t off = rd16(q), out = q[2];
+        int match = 0;
+        if (ev == OTC_EV_GATE) {
+            uint8_t cur[8];
+            otb_host_cur_ev_name(cur);
+            if (off + 2u <= vm->pool_len) {
+                const uint8_t *np = vm->tab + vm->pool_off + off;
+                uint32_t len = np[1], i;
+                if (len <= 8u && otb_host_gate_out() == out) {
+                    match = 1;
+                    for (i = 0; i < len; i++)
+                        if (np[2 + i] != cur[i])
+                            match = 0;
+                    for (; i < 8u; i++)
+                        if (cur[i] != 0)
+                            match = 0;
+                    if (match && otb_host_gate_ran()) {   /* a feedback link: one tick later */
+                        otb_host_gate_defer();
+                        match = 0;
+                    }
+                }
+            }
+        }
+        if (!match)
+            fr->pc = (uint16_t)rd16(q + 3);
+        return 0;
+    }
     case I_LBEG:   return i_lbeg(fr, rd16(q));
     case I_LNEXT:  return i_lnext(fr, rd16(q));
     case I_EBEG:   return i_ebeg(fr, rd16(q));
@@ -3064,6 +3299,27 @@ void otc_vm_reset_state(otc_vm_t *vm)
         s->d_wrap = 0;
         s->touched = 0;
     }
+    vm->nvars = 0;
+    for (k = 0; k < 16; k++)
+        vm->vars[k] = 0;
+    if (vm->loaded && vm->tab) {
+        for (k = 0; k < vm->nfunc; k++) {
+            const otc_fn_t *f = &vm->fn[k];
+            uint8_t flags = vm->tab[rd16(vm->tab + 14) + k * 54 + 23];
+            if (flags & OTC_FL_VARS) {
+                uint16_t hbits = rd16(vm->tab + rd16(vm->tab + 14) + k * 54 + 18);
+                uint32_t aux_base = (uint32_t)f->nparams * 8 + (uint32_t)f->nargs * 2 + (uint32_t)f->nctr * 4
+                                  + ((hbits & 0x80u) ? 2u : 0u) + ((hbits & 0x40u) ? 4u : 0u) + ((flags & OTC_FL_CONFIRM_TEXT) ? 2u : 0u);
+                uint16_t nvars = rd16(vm->tab + f->aux + aux_base);
+                uint32_t vi;
+                if (nvars > 16) nvars = 16;
+                vm->nvars = (uint8_t)nvars;
+                for (vi = 0; vi < nvars; vi++) {
+                    vm->vars[vi] = (int16_t)rds16(vm->tab + f->aux + aux_base + 2u + vi * 2u);
+                }
+            }
+        }
+    }
     for (k = 0; k < OTC_MAX_COUNTERS; k++) {
         vm->ctr_val[k] = 0;
         vm->ctr_set[k] = 0;
@@ -3109,9 +3365,11 @@ int otc_vm_load(otc_vm_t *vm, const uint8_t *otb, uint32_t len)
         f->code_len = (uint16_t)rd16(e + 46);
         f->nlines = (uint16_t)rd16(e + 52);
         f->def_line = (uint16_t)rd16(e + 42);
+        f->tag_label = 0;
         if (fcode_off + f->code_len > code_len
             || faux + (uint32_t)f->nparams * 8 + (uint32_t)f->nargs * 2 + (uint32_t)f->nctr * 4
-                   + ((rd16(e + 18) & 0x80u) ? 2u : 0u) + ((e[23] & OTC_FL_CONFIRM_TEXT) ? 2u : 0u) > aux_len
+                   + ((rd16(e + 18) & 0x80u) ? 2u : 0u) + ((rd16(e + 18) & 0x40u) ? 4u : 0u) + ((e[23] & OTC_FL_CONFIRM_TEXT) ? 2u : 0u)
+                   + ((e[23] & OTC_FL_LAUNCH) ? 2u : 0u) > aux_len
             || fline + (uint32_t)f->nlines * 4 > line_len)
             return OTC_E_TABLE;
         if (f->nargs > OTC_MAX_ARGS || e[34] > OTC_MAX_LOCALS || f->maxs > OTC_MAX_STACK
@@ -3130,11 +3388,24 @@ int otc_vm_load(otc_vm_t *vm, const uint8_t *otb, uint32_t len)
             for (pk = 0; pk < pn; pk++)
                 if (otb[pool_off + po + 2 + pk] < 0x20 || otb[pool_off + po + 2 + pk] > 0x7E)
                     return OTC_E_TABLE;
-            f->page = (uint16_t)po;
+            f->tag_label = (uint16_t)po;
         }
-        if (e[23] & OTC_FL_CONFIRM_TEXT) {          /* the confirm text's pool offset, after the page label */
+        if (rd16(e + 18) & 0x40u) {                 /* MODULE: label pool offset + clock ticks */
+            uint32_t mo = rd16(otb + aux_off + faux + (uint32_t)f->nparams * 8 + (uint32_t)f->nargs * 2
+                               + (uint32_t)f->nctr * 4), pn, pk;
+            if (f->nargs || (rd16(e + 18) & 0x80u) || mo < 2 || mo + 2 > pool_len)
+                return OTC_E_TABLE;
+            pn = otb[pool_off + mo + 1];
+            if (otb[pool_off + mo] != P_STR || pn < 1 || pn > OTC_MODULE_LABEL || mo + 2 + pn > pool_len)
+                return OTC_E_TABLE;
+            for (pk = 0; pk < pn; pk++)
+                if (otb[pool_off + mo + 2 + pk] < 0x20 || otb[pool_off + mo + 2 + pk] > 0x7E)
+                    return OTC_E_TABLE;
+            f->tag_label = (uint16_t)mo;
+        }
+        if (e[23] & OTC_FL_CONFIRM_TEXT) {          /* the confirm text's pool offset, after page and module */
             uint32_t po = rd16(otb + aux_off + faux + (uint32_t)f->nparams * 8 + (uint32_t)f->nargs * 2
-                               + (uint32_t)f->nctr * 4 + (f->page ? 2u : 0u)), pn, pk;
+                               + (uint32_t)f->nctr * 4 + ((rd16(e + 18) & 0x80u) ? 2u : 0u) + ((rd16(e + 18) & 0x40u) ? 4u : 0u)), pn, pk;
             if (po < 2 || po + 2 > pool_len || otb[pool_off + po] != P_STR)
                 return OTC_E_TABLE;
             pn = otb[pool_off + po + 1];
@@ -3159,8 +3430,8 @@ int otc_vm_load(otc_vm_t *vm, const uint8_t *otb, uint32_t len)
     vm->pool_len = pool_len;
     vm->nfunc = (uint16_t)nfunc;
     vm->nctr_total = (uint16_t)nctr_total;
-    otc_vm_reset_state(vm);
     vm->loaded = 1;
+    otc_vm_reset_state(vm);
     return 0;
 }
 
@@ -3168,12 +3439,16 @@ uint32_t otc_vm_fn_confirm(const otc_vm_t *vm, uint32_t fn, const char **text)
 {
     const otc_fn_t *f;
     uint32_t po;
+    const uint8_t *e;
+    uint16_t hbits;
     if (!vm->loaded || fn >= vm->nfunc)
         return 0;
     f = &vm->fn[fn];
-    if (!(vm->tab[rd16(vm->tab + 14) + fn * 54 + 23] & OTC_FL_CONFIRM_TEXT))   /* the entry's flags (validated at load) */
+    e = vm->tab + rd16(vm->tab + 14) + fn * 54;
+    if (!(e[23] & OTC_FL_CONFIRM_TEXT))   /* the entry's flags (validated at load) */
         return 0;
-    po = rd16(vm->tab + f->ctr + (uint32_t)f->nctr * 4 + (f->page ? 2u : 0u));
+    hbits = rd16(e + 18);
+    po = rd16(vm->tab + f->ctr + (uint32_t)f->nctr * 4 + ((hbits & 0x80u) ? 2u : 0u) + ((hbits & 0x40u) ? 4u : 0u));
     if (text)
         *text = (const char *)(vm->tab + vm->pool_off + po + 2);
     return vm->tab[vm->pool_off + po + 1];
@@ -3188,11 +3463,88 @@ uint32_t otc_vm_fn_input_sample(const otc_vm_t *vm, uint32_t fn)
 
 uint32_t otc_vm_fn_page(const otc_vm_t *vm, uint32_t fn, const char **label)
 {
-    if (!vm->loaded || fn >= vm->nfunc || !vm->fn[fn].page)
+    const uint8_t *e;
+    if (!vm->loaded || fn >= vm->nfunc || !vm->fn[fn].tag_label)
+        return 0;
+    e = vm->tab + rd16(vm->tab + 14) + fn * 54;
+    if (!(rd16(e + 18) & 0x80u))
         return 0;
     if (label)
-        *label = (const char *)(vm->tab + vm->pool_off + vm->fn[fn].page + 2);
-    return vm->tab[vm->pool_off + vm->fn[fn].page + 1];
+        *label = (const char *)(vm->tab + vm->pool_off + vm->fn[fn].tag_label + 2);
+    return vm->tab[vm->pool_off + vm->fn[fn].tag_label + 1];
+}
+
+uint32_t otc_vm_fn_module(const otc_vm_t *vm, uint32_t fn, const char **label)
+{
+    const uint8_t *e;
+    if (!vm->loaded || fn >= vm->nfunc || !vm->fn[fn].tag_label)
+        return 0;
+    e = vm->tab + rd16(vm->tab + 14) + fn * 54;
+    if (!(rd16(e + 18) & 0x40u))
+        return 0;
+    if (label)
+        *label = (const char *)(vm->tab + vm->pool_off + vm->fn[fn].tag_label + 2);
+    return vm->tab[vm->pool_off + vm->fn[fn].tag_label + 1];
+}
+
+/* The aux offset where the `launch N` block sits: after the param sources, the last optional block. */
+static uint32_t aux_after_param_sources(const otc_vm_t *vm, const otc_fn_t *f, const uint8_t *e)
+{
+    uint16_t hbits = rd16(e + 18);
+    uint8_t flags = e[23];
+    uint32_t aux_base = (uint32_t)f->nparams * 8 + (uint32_t)f->nargs * 2 + (uint32_t)f->nctr * 4
+                      + ((hbits & 0x80u) ? 2u : 0u) + ((hbits & 0x40u) ? 4u : 0u) + ((flags & OTC_FL_CONFIRM_TEXT) ? 2u : 0u);
+    const uint8_t *tp;
+    uint32_t j;
+    if (flags & OTC_FL_VARS) {
+        uint16_t nvars = rd16(vm->tab + f->aux + aux_base);
+        aux_base += 2u + (uint32_t)nvars * 2u;
+    }
+    if (flags & OTC_FL_TYPED_PARAMS) {
+        tp = vm->tab + f->aux + aux_base;
+        uint16_t mask = rd16(tp);
+        tp += 2;
+        for (j = 0; j < f->nparams; j++) {
+            uint8_t jk = (uint8_t)((mask >> (2u * j)) & 3u);
+            if (jk == OTC_PK_FOLDER) tp += 2;
+            else if (jk == OTC_PK_OPTION) {
+                uint16_t cnt = rd16(tp);
+                tp += 2 + (uint32_t)cnt * 2;
+            }
+        }
+        aux_base = (uint32_t)(tp - (vm->tab + f->aux));
+    }
+    return aux_base;
+}
+
+uint32_t otc_vm_fn_launch(const otc_vm_t *vm, uint32_t fn)
+{
+    const uint8_t *e;
+    const otc_fn_t *f;
+    uint32_t aux_base;
+    if (!vm->loaded || fn >= vm->nfunc)
+        return 0;
+    e = vm->tab + rd16(vm->tab + 14) + fn * 54;
+    if (!(e[23] & OTC_FL_LAUNCH))
+        return 0;
+    f = &vm->fn[fn];
+    aux_base = aux_after_param_sources(vm, f, e);
+    if (e[23] & OTC_FL_PARAM_SOURCES)
+        aux_base += (uint32_t)f->nparams * 4u;
+    return rd16(vm->tab + f->aux + aux_base);
+}
+
+uint32_t otc_vm_fn_clock(const otc_vm_t *vm, uint32_t fn)
+{
+    const uint8_t *e;
+    const otc_fn_t *f;
+    if (!vm->loaded || fn >= vm->nfunc || !vm->fn[fn].tag_label)
+        return 0;
+    e = vm->tab + rd16(vm->tab + 14) + fn * 54;
+    if (!(rd16(e + 18) & 0x40u))
+        return 0;
+    f = &vm->fn[fn];
+    return rd16(vm->tab + f->ctr + (uint32_t)f->nctr * 4 + 2u);
 }
 
 int otc_vm_fn_param(const otc_vm_t *vm, uint32_t fn, uint32_t k, otc_vm_param_t *out)
@@ -3230,8 +3582,9 @@ int otc_vm_fn_param(const otc_vm_t *vm, uint32_t fn, uint32_t k, otc_vm_param_t 
     }
     flags = vm->tab[rd16(vm->tab + 14) + fn * 54 + 23];
     if (flags & OTC_FL_TYPED_PARAMS) {
+        uint16_t hbits = rd16(vm->tab + rd16(vm->tab + 14) + fn * 54 + 18);
         uint32_t aux_base = (uint32_t)f->nparams * 8 + (uint32_t)f->nargs * 2 + (uint32_t)f->nctr * 4
-                          + (f->page ? 2u : 0u) + ((flags & OTC_FL_CONFIRM_TEXT) ? 2u : 0u);
+                          + ((hbits & 0x80u) ? 2u : 0u) + ((hbits & 0x40u) ? 4u : 0u) + ((flags & OTC_FL_CONFIRM_TEXT) ? 2u : 0u);
         const uint8_t *tp = vm->tab + f->aux + aux_base;
         uint16_t mask = rd16(tp);
         tp += 2;
@@ -3273,6 +3626,78 @@ int otc_vm_fn_param(const otc_vm_t *vm, uint32_t fn, uint32_t k, otc_vm_param_t 
     return 1;
 }
 
+int otc_vm_fn_param_src(const otc_vm_t *vm, uint32_t fn, uint32_t k, uint8_t *out_kind, uint8_t *out_ch, uint8_t *out_num)
+{
+    const otc_fn_t *f;
+    uint8_t flags;
+    if (out_kind) *out_kind = 0;
+    if (out_ch) *out_ch = 0;
+    if (out_num) *out_num = 0;
+    if (!vm->loaded || fn >= vm->nfunc || k >= vm->fn[fn].nparams)
+        return 0;
+    f = &vm->fn[fn];
+    flags = vm->tab[rd16(vm->tab + 14) + fn * 54 + 23];
+    if (flags & 64u) { /* F_PARAM_SOURCES */
+        uint16_t hbits = rd16(vm->tab + rd16(vm->tab + 14) + fn * 54 + 18);
+        uint32_t aux_base = (uint32_t)f->nparams * 8 + (uint32_t)f->nargs * 2 + (uint32_t)f->nctr * 4
+                          + ((hbits & 0x80u) ? 2u : 0u) + ((hbits & 0x40u) ? 4u : 0u) + ((flags & 4u) ? 2u : 0u);
+        const uint8_t *tp;
+        if (flags & 32u) { /* F_VARS */
+            uint16_t nvars = rd16(vm->tab + f->aux + aux_base);
+            aux_base += 2u + (uint32_t)nvars * 2u;
+        }
+        if (flags & 8u) { /* F_TYPED_PARAMS */
+            uint32_t j;
+            tp = vm->tab + f->aux + aux_base;
+            uint16_t mask = rd16(tp);
+            tp += 2;
+            for (j = 0; j < f->nparams; j++) {
+                uint8_t jk = (uint8_t)((mask >> (2u * j)) & 3u);
+                if (jk == 3u) tp += 2;
+                else if (jk == 2u) {
+                    uint16_t cnt = rd16(tp);
+                    tp += 2 + (uint32_t)cnt * 2;
+                }
+            }
+            aux_base = (uint32_t)(tp - (vm->tab + f->aux));
+        }
+        tp = vm->tab + f->aux + aux_base + k * 4;
+        if (out_kind) *out_kind = tp[0];
+        if (out_ch)   *out_ch   = tp[1];
+        if (out_num)  *out_num  = tp[2];
+    }
+    return 1;
+}
+
+uint32_t otc_vm_fn_vars(const otc_vm_t *vm, uint32_t fn, int16_t *vals, uint32_t n)
+{
+    const otc_fn_t *f;
+    uint8_t flags;
+    uint32_t vi, count = 0;
+    if (vals && n > 0) {
+        for (vi = 0; vi < n; vi++)
+            vals[vi] = 0;
+    }
+    if (!vm || !vm->loaded || fn >= vm->nfunc)
+        return 0;
+    f = &vm->fn[fn];
+    flags = vm->tab[rd16(vm->tab + 14) + fn * 54 + 23];
+    if (flags & OTC_FL_VARS) {
+        uint16_t hbits = rd16(vm->tab + rd16(vm->tab + 14) + fn * 54 + 18);
+        uint32_t aux_base = (uint32_t)f->nparams * 8 + (uint32_t)f->nargs * 2 + (uint32_t)f->nctr * 4
+                          + ((hbits & 0x80u) ? 2u : 0u) + ((hbits & 0x40u) ? 4u : 0u) + ((flags & OTC_FL_CONFIRM_TEXT) ? 2u : 0u);
+        uint16_t nvars = rd16(vm->tab + f->aux + aux_base);
+        if (nvars > 16) nvars = 16;
+        count = nvars;
+        if (vals && n > 0) {
+            uint32_t to_copy = (n < count) ? n : count;
+            for (vi = 0; vi < to_copy; vi++)
+                vals[vi] = (int16_t)rds16(vm->tab + f->aux + aux_base + 2u + vi * 2u);
+        }
+    }
+    return count;
+}
+
 void otc_vm_set_params(otc_vm_t *vm, const int16_t *vals, uint32_t n)
 {
     uint32_t k;
@@ -3289,6 +3714,29 @@ void otc_vm_set_param_folder(otc_vm_t *vm, uint32_t k, const char *path, uint32_
         return;
     vm->folder_path[k] = path;
     vm->folder_len[k] = (uint8_t)(path ? (len > 255u ? 255u : len) : 0u);
+}
+
+void otc_vm_set_vars(otc_vm_t *vm, const int16_t *vals, uint32_t n)
+{
+    uint32_t k;
+    if (!vm) return;
+    if (!vals || n > 16)
+        n = vals ? 16 : 0;
+    for (k = 0; k < n; k++)
+        vm->vars[k] = vals[k];
+    for (; k < 16; k++)
+        vm->vars[k] = 0;
+    vm->nvars = (uint8_t)n;
+}
+
+void otc_vm_get_vars(const otc_vm_t *vm, int16_t *vals, uint32_t n)
+{
+    uint32_t k;
+    if (!vm || !vals)
+        return;
+    if (n > 16) n = 16;
+    for (k = 0; k < n; k++)
+        vals[k] = vm->vars[k];
 }
 
 /* a press starts with the root frame's empty list, no warning, no refusal, an empty working set; the
@@ -3322,6 +3770,8 @@ int otc_vm_run(otc_vm_t *vm, uint16_t func_index, uint16_t seed, uint8_t host_tr
     vm->nframes = 0;
     for (k = 0; k < OTC_NSTREAMS; k++)
         vm->draws[k] = 0;
+    for (k = 0; k < 32; k++)
+        vm->nx_locks[k] = 0xFF;
     if (!vm->loaded || func_index >= vm->nfunc || vm->fn[func_index].nargs != 0
         || host_track < 1 || host_track > 8) {
         vm->error = OTC_E_ARG;

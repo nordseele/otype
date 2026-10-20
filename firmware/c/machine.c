@@ -61,6 +61,10 @@ static uint32_t machine_offset(uint32_t h, uint32_t t, uint32_t n)
     case OTC_H_LFO_MULT: return 0x30a + t * 30 + n - 1;
     case OTC_H_LFO_TRIG: return 0x30d + t * 30 + n - 1;
     case OTC_H_LFOD_GET: case OTC_H_LFOD_SET: return 0x1702 + t * 16 + n - 1;
+    case OTC_H_REC_SRC: return 0x602 + t * 12 + (n == 1 ? 0 : n == 2 ? 1 : 4);
+    case OTC_H_REC_LEN: return 0x602 + t * 12 + 2;
+    case OTC_H_REC_TRIG: return 0x602 + t * 12 + 3;      /* RECORDING SETUP 1, in the page's own order */
+    case OTC_H_REC_LOOP: return 0x602 + t * 12 + 5;
     case OTC_H_SCN_GET: {
         volatile uint32_t scene_off = (n / 32) * 256; /* keep GCC from emitting a ColdFire-invalid index scale of 8 */
         return 0x662 + scene_off + t * 32 + n % 32;
@@ -133,6 +137,27 @@ int32_t otb_host_control_write(uint32_t h, uint32_t t, uint32_t n, int32_t v)
         M16((uintptr_t)pt + off) = (uint16_t)old;
         M16(0x100a4ece + M8(0x100b14cf) * 0x18b2 + off) = (uint16_t)old;
         return 1;
+    case OTC_H_REC_SRC:
+        if (n < 1 || n > 3) return 0;
+        if (n == 1 && (v < 0 || v > 4)) return 0;
+        if (n == 2 && (v < 0 || v > 4)) return 0;
+        if (n == 3 && (v < 0 || v > 10)) return 0;
+        machine_store(off, v);
+        return 1;
+    case OTC_H_REC_LEN:
+        /* v = RLEN as the page shows it: 1..63 steps, 64 = MAX. The part holds it 0-based
+         * (0..63 = 1..64 steps, 64 = MAX: the descriptor has 65 values). */
+        if (v < 1 || v > 64) return 0;
+        machine_store(off, v >= 64 ? 64 : (uint32_t)v - 1);
+        return 1;
+    case OTC_H_REC_TRIG:
+        if (v < 0 || v > 2) return 0;                  /* ONE, ONE-2, HOLD */
+        machine_store(off, v);
+        return 1;
+    case OTC_H_REC_LOOP:
+        if (v < 0 || v > 1) return 0;
+        machine_store(off, v);
+        return 1;
     default:
         page = h == OTC_H_PB_SETUP ? 0 : h == OTC_H_AMP_SETUP ? 2 : h == OTC_H_FX1_SETUP ? 3 : h == OTC_H_FX2_SETUP ? 4 : 1;
         desc = ((uint8_t *(*)(uint32_t, uint32_t))(uintptr_t)0x40031da4)(t, page);
@@ -171,6 +196,14 @@ int32_t otb_host_control_action(otc_vm_t *vm, uint32_t h, int32_t a, int32_t b)
         FN1(0x40093468)(0xffffffffu);
         FN1(0x4009da20)(0xffffffffu);
         break;
+    case OTC_H_PAT_COPY:
+        /* [FUNCTION]+[STOP] without the clipboard: the undo snapshot first (0x460bf218, nature 14), then the stock
+         * writer 0x4002b9b0(src, dst), which copies the 0x8ed8 bytes into the bank AND its SRAM copy, sets the
+         * dirty flags, re-applies the selected pattern's part and fixes the tempo. The source is read in the bank. */
+        otb_host_commit(vm);
+        FN2(0x40026ef0)(0x11u, (uint32_t)(b - 1));
+        FN2(0x4002b9b0)((uint32_t)(uintptr_t)(machine_bank() + (uint32_t)(a - 1) * 0x8ed8), (uint32_t)(b - 1));
+        break;
     case OTC_H_PART_SAVE: case OTC_H_PART_RELOAD:
         otb_host_commit(vm);
         if (h == OTC_H_PART_SAVE) FN1(0x4004a908)((uint32_t)(a - 1));
@@ -183,9 +216,19 @@ int32_t otb_host_control_action(otc_vm_t *vm, uint32_t h, int32_t a, int32_t b)
         FN0(0x400a5460)();
         break;
     case OTC_H_OS_ARM:
-        M16(0x46c7ff64) &= (uint16_t)~(1u << a);
+        /* 0x46c7ff64 bit t = the sample one-shots of track t, bit t+8 = its recorder one-shots (the
+         * checks at 0x4000b934 / 0x40030632); [STOP]+[STOP] re-arms both (manual 12.4.5). */
+        M16(0x46c7ff64) &= (uint16_t)~((1u << a) | (1u << (a + 8)));
         FN1(0x4004d948)(0xffffffffu);
         break;
+    case OTC_H_REC_ARM: {
+        /* the panel's own word: 0x8010 | REC1 (0x1000), REC2 (0x2000), REC3 (0x4000) -- 0x9010 for AB.
+         * The stock routine schedules the start itself, so QREC still applies. */
+        uint32_t word = 0x8010u | ((uint32_t)(b & 1) ? 0x1000u : 0u)
+                      | ((uint32_t)(b & 2) ? 0x2000u : 0u) | ((uint32_t)(b & 4) ? 0x4000u : 0u);
+        FN3(0x40005178)((uint32_t)a, word, 1);
+        break;
+    }
     default: return OTC_E_UNSUPPORTED;
     }
     otb_host_refresh(vm);

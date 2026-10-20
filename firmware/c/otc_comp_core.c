@@ -526,7 +526,7 @@ static int cc_is_name(const uint8_t *p, uint32_t n, int up)
 /* name_problem(): 0 = none, else the reason; cc_np_text appends the message */
 enum { NP_NONE = 0, NP_QUOTED, NP_DOT, NP_BAD, NP_LONG, NP_KEYWORD, NP_VAR, NP_OP, NP_COND };
 
-static int cc_name_problem(const uint8_t *p, uint32_t n, int up, int is_word)
+int cc_name_problem(const uint8_t *p, uint32_t n, int up, int is_word)
 {
     uint32_t i;
     if (!is_word && !cc_is_name(p, n, up))
@@ -549,7 +549,7 @@ static int cc_name_problem(const uint8_t *p, uint32_t n, int up, int is_word)
     return NP_NONE;
 }
 
-static void cc_np_text(otc_comp_t *c, int np, const uint8_t *p, uint32_t n, int up)
+void cc_np_text(otc_comp_t *c, int np, const uint8_t *p, uint32_t n, int up)
 {
     switch (np) {
     case NP_QUOTED:

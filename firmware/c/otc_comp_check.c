@@ -174,6 +174,7 @@ static uint32_t ck_ntype(ck_t *k, const otc_node_t *nd)
     switch (nd->kind) {
     case OTC_N_NUM:
     case OTC_N_VAR:
+    case OTC_N_VAR_NAMED:
     case OTC_N_OP:
     case OTC_N_CALL:
         return CL_INT;
@@ -573,7 +574,7 @@ CC_NOINLINE static void ck_check_func(otc_comp_t *c, uint32_t fi, int rep)
         if (ln->body && !(ln->flags & OTC_LF_DECL)) {
             const otc_node_t *s = ND(c, ln->body);
             uint8_t sk = s->kind;
-            if (sk == OTC_N_ASSIGN) {
+            if (sk == OTC_N_ASSIGN || sk == OTC_N_ASSIGN_VAR_NAMED) {
                 ck_node(&k, s->first, OTC_K_INT, 0, 0, 0xFFFFFFFFu);
             } else if (sk == OTC_N_SETSTMT) {
                 const otc_reg_t *r = &otc_reg[s->op];
@@ -1070,6 +1071,231 @@ CC_NOINLINE static int ck_page(otc_comp_t *c)
     return c->err == 0;
 }
 
+/* ---- pass_module ----------------------------------------------------------------------------------------
+ * A `module` function may not use an op of the namespaces FILE, SLOT, POOL, nor confirm, directly or through
+ * what it calls. Twin of pass_module in tools/otype.py. */
+static void ck_mod_direct(otc_comp_t *c, uint32_t i)
+{
+    io_t io;
+    otc_fx_t *fx = FX(c, i);
+    const otc_func_t *f = FNI(c, i);
+    io.found = 0;
+    io.op = io.line = 0;
+    if (f->flags & OTC_FF_CONFIRM) {
+        fx->mod_kind = 2; /* confirm */
+        fx->mod_line = (f->module_label && PTR(c, otc_live_t, f->module_label)->confirm_decl_line)
+                       ? PTR(c, otc_live_t, f->module_label)->confirm_decl_line : f->line;
+    }
+    ck_walk_func(c, fx->func, ck_io_visit, &io);
+    if (io.found && (!fx->mod_kind || io.line < fx->mod_line)) {
+        fx->mod_kind = 1; /* op */
+        fx->mod_op = (uint8_t)(io.op + 1u);
+        fx->mod_line = io.line;
+    }
+    fx->modstate = 2;
+}
+
+static int op_needs_module(uint32_t op)
+{
+    const char *nm = (const char *)&otc_rstr[otc_reg[op].name];
+    if (nm[0] == 'N' && nm[1] == 'X' && nm[2] == '.')
+        return 1;
+    /* the script gates and outputs: they need a live script (a slot), like nx.* */
+    if (cc_ci_eq((const uint8_t *)nm, cc_cstrlen(nm), "GATE"))
+        return 1;
+    if (cc_ci_eq((const uint8_t *)nm, cc_cstrlen(nm), "OUT"))
+        return 1;
+    if (cc_ci_eq((const uint8_t *)nm, cc_cstrlen(nm), "CV"))
+        return 1;
+    return 0;
+}
+
+static void ck_nx_visit(otc_comp_t *c, void *ctx, uint32_t node, uint32_t line)
+{
+    io_t *nx = (io_t *)ctx;
+    const otc_node_t *nd = ND(c, node);
+    if (nd->kind == OTC_N_OP || nd->kind == OTC_N_PRED || nd->kind == OTC_N_SETSTMT) {
+        if (op_needs_module(nd->op) && (!nx->found || line < nx->line)) {
+            nx->found = 1;
+            nx->line = line;
+            nx->op = nd->op;
+        }
+    }
+}
+
+static void ck_nx_direct(otc_comp_t *c, uint32_t i)
+{
+    io_t nx;
+    otc_fx_t *fx = FX(c, i);
+    nx.found = 0;
+    nx.op = nx.line = 0;
+    ck_walk_func(c, fx->func, ck_nx_visit, &nx);
+    fx->nxstate = 1;
+    if (nx.found) {
+        fx->nx_op = (uint8_t)(nx.op + 1u);
+        fx->nx_line = nx.line;
+        fx->nxstate = 2;
+    }
+}
+
+CC_NOINLINE static int ck_nx(otc_comp_t *c)
+{
+    uint32_t i, fo = 0, fp;
+    ck_frame_t *fr = 0;
+    io_t nx;
+    nx.found = 0;
+    nx.op = nx.line = 0;
+    for (i = 0; i < c->nf; i++) {
+        if (FNI(c, i)->flags & OTC_FF_REG) {
+            ck_walk_func(c, FX(c, i)->func, ck_nx_visit, &nx);
+            if (nx.found)
+                break;
+        }
+    }
+    if (!nx.found)
+        return 1;
+    fo = cc_alloc(c, c->nf * (uint32_t)sizeof(ck_frame_t));
+    if (!fo)
+        return 0;
+    fr = PTR(c, ck_frame_t, fo);
+    for (i = 0; i < c->nf && !c->err; i++) {
+        otc_fx_t *rx = FX(c, i);
+        if (!(FNI(c, i)->flags & OTC_FF_REG) || FNI(c, i)->module_line)
+            continue;
+        if (!rx->nxstate) {
+            ck_nx_direct(c, i);
+            fr[0].v = i;
+            fr[0].e = 0;
+            fp = 1;
+            while (fp && !c->err) {
+                ck_frame_t *t = &fr[fp - 1u];
+                otc_fx_t *vx = FX(c, t->v);
+                int pushed = 0;
+                if (vx->nxstate == 2) {
+                    fp--;
+                    continue;
+                }
+                while (t->e < vx->ncg) {
+                    const otc_edge_t *ed = PTR(c, otc_edge_t, vx->cg) + t->e;
+                    otc_fx_t *gx = FX(c, ed->g);
+                    if (gx->cyclic || gx->nxstate == 1) {
+                        t->e++;
+                        continue;
+                    }
+                    if (!gx->nxstate) {
+                        ck_nx_direct(c, ed->g);
+                        fr[fp].v = ed->g;
+                        fr[fp].e = 0;
+                        fp++;
+                        pushed = 1;
+                        break;
+                    }
+                    if (gx->nx_op) {
+                        vx->nx_op = gx->nx_op;
+                        vx->nx_line = ed->line;
+                        break;
+                    }
+                    t->e++;
+                }
+                if (pushed)
+                    continue;
+                vx->nxstate = 2;
+                fp--;
+            }
+        }
+    }
+    for (i = 0; i < c->nf && !c->err; i++) {
+        const otc_fx_t *fx = FX(c, i);
+        if ((FNI(c, i)->flags & OTC_FF_REG) && !FNI(c, i)->module_line && fx->nx_op) {
+            mb_begin(c);
+            mb_lit(c, "op ");
+            mb_rstr(c, otc_reg[fx->nx_op - 1u].shown);
+            mb_lit(c, " only allowed in a live script");
+            cc_func_err(c, fx->func, fx->nx_line, mb_end(c), 0);
+        }
+    }
+    return c->err == 0;
+}
+
+CC_NOINLINE static int ck_module(otc_comp_t *c)
+{
+    uint32_t i, fo = 0, fp;
+    ck_frame_t *fr = 0;
+    for (i = 0; i < c->nf; i++)
+        if ((FNI(c, i)->flags & OTC_FF_REG) && FNI(c, i)->module_line)
+            break;
+    if (i == c->nf)
+        return ck_nx(c);                                  /* no module function */
+    fo = cc_alloc(c, c->nf * (uint32_t)sizeof(ck_frame_t));
+    if (!fo)
+        return 0;
+    fr = PTR(c, ck_frame_t, fo);
+    for (i = 0; i < c->nf && !c->err; i++) {
+        otc_fx_t *rx = FX(c, i);
+        if (!(FNI(c, i)->flags & OTC_FF_REG) || !FNI(c, i)->module_line)
+            continue;
+        if (!rx->modstate) {
+            ck_mod_direct(c, i);
+            fr[0].v = i;
+            fr[0].e = 0;
+            fp = 1;
+            while (fp && !c->err) {
+                ck_frame_t *t = &fr[fp - 1u];
+                otc_fx_t *vx = FX(c, t->v);
+                int pushed = 0;
+                if (vx->mod_kind) {                       /* direct problem: done */
+                    fp--;
+                    continue;
+                }
+                while (t->e < vx->ncg) {
+                    const otc_edge_t *ed = PTR(c, otc_edge_t, vx->cg) + t->e;
+                    otc_fx_t *gx = FX(c, ed->g);
+                    if (gx->cyclic || gx->modstate == 1) {
+                        t->e++;
+                        continue;
+                    }
+                    if (!gx->modstate) {
+                        ck_mod_direct(c, ed->g);
+                        fr[fp].v = ed->g;
+                        fr[fp].e = 0;
+                        fp++;
+                        pushed = 1;
+                        break;
+                    }
+                    if (gx->mod_kind) {
+                        vx->mod_kind = gx->mod_kind;
+                        vx->mod_op = gx->mod_op;
+                        vx->mod_line = ed->line;
+                        break;
+                    }
+                    t->e++;
+                }
+                if (pushed)
+                    continue;
+                vx->modstate = 2;
+                fp--;
+            }
+        }
+    }
+    for (i = 0; i < c->nf && !c->err; i++) {
+        const otc_fx_t *fx = FX(c, i);
+        if ((FNI(c, i)->flags & OTC_FF_REG) && FNI(c, i)->module_line && fx->mod_kind) {
+            if (fx->mod_kind == 2) {
+                cc_err_lit(c, fx->func, fx->mod_line, "confirm not allowed in a live script");
+            } else if (fx->mod_kind == 1 && fx->mod_op) {
+                mb_begin(c);
+                mb_lit(c, "op ");
+                mb_rstr(c, otc_reg[fx->mod_op - 1u].shown);
+                mb_lit(c, " not allowed in a live script");
+                cc_func_err(c, fx->func, fx->mod_line, mb_end(c), 0);
+            }
+        }
+    }
+    if (c->err)
+        return 0;
+    return ck_nx(c);
+}
+
 /* ---- pass_input_sample -------------------------------------------------------------------------------
  * A function using a src.* op directly or through what it calls must declare `input sample`. Any registered function
  * without `input sample` that reaches a `src.*` op is refused: `op <shown> needs input sample`.
@@ -1170,6 +1396,234 @@ CC_NOINLINE static int ck_input_sample(otc_comp_t *c)
             mb_rstr(c, otc_reg[fx->src_op - 1u].shown);
             mb_lit(c, " needs input sample");
             cc_func_err(c, fx->func, fx->src_line, mb_end(c), 0);
+        }
+    }
+    return c->err == 0;
+}
+
+/* ---- pass_live -----------------------------------------------------------------------------------------
+ * A live script (an `in` block, nib != 0) may not run a menu-only operation (`pat.copy`): it is destructive and
+ * its confirmation cannot be asked from a live wake. Same rule as pass_module, directly or through what it
+ * calls. tools/otype.py Program.pass_live is the twin. */
+static int ck_name_is(uint32_t op, const char *upper)
+{
+    const char *nm = (const char *)&otc_rstr[otc_reg[op].name];
+    while (*upper) {
+        if (*nm++ != *upper++)
+            return 0;
+    }
+    return *nm == 0;
+}
+
+static uint32_t ck_live_nib(const otc_comp_t *c, const otc_func_t *f)
+{
+    return f->module_label ? PTR(c, otc_live_t, f->module_label)->nib : 0;
+}
+
+static int ck_is_menu_only(uint32_t op)
+{
+    uint32_t i;
+    for (i = 0; i < OTC_NMENU_ONLY; i++)
+        if ((uint32_t)otc_menu_only[i] == op)
+            return 1;
+    return 0;
+}
+
+static void ck_mo_visit(otc_comp_t *c, void *ctx, uint32_t node, uint32_t line)
+{
+    io_t *mo = (io_t *)ctx;
+    const otc_node_t *nd = ND(c, node);
+    if ((nd->kind == OTC_N_OP || nd->kind == OTC_N_PRED || nd->kind == OTC_N_SETSTMT) &&
+        ck_is_menu_only(nd->op) && (!mo->found || line < mo->line)) {
+        mo->found = 1;
+        mo->line = line;
+        mo->op = nd->op;
+    }
+}
+
+static void ck_mo_direct(otc_comp_t *c, uint32_t i, io_t *mo)
+{
+    mo->found = 0;
+    mo->op = mo->line = 0;
+    ck_walk_func(c, FX(c, i)->func, ck_mo_visit, mo);
+}
+
+CC_NOINLINE static int ck_live(otc_comp_t *c)
+{
+    uint32_t i, n = c->nf, k;
+    uint32_t *st = 0, *opl = 0, *lin = 0, fo = 0;
+    ck_frame_t *fr = 0;
+    for (i = 0; i < n; i++)
+        if ((FNI(c, i)->flags & OTC_FF_REG) && ck_live_nib(c, FNI(c, i)))
+            break;
+    if (i == n)
+        return 1;                                         /* no live script: nothing to do (and nothing allocated) */
+    fo = cc_alloc(c, n * 4u + n * 4u + n * 4u + n * (uint32_t)sizeof(ck_frame_t));
+    if (!fo)
+        return 0;
+    st = PTR(c, uint32_t, fo);
+    opl = st + n;
+    lin = opl + n;
+    fr = PTR(c, ck_frame_t, fo + 3u * n * 4u);
+    for (k = 0; k < n; k++)
+        st[k] = opl[k] = lin[k] = 0;
+    for (i = 0; i < n && !c->err; i++) {
+        uint32_t fp;
+        if (!(FNI(c, i)->flags & OTC_FF_REG) || !ck_live_nib(c, FNI(c, i)) || st[i])
+            continue;
+        {
+            io_t mo;
+            ck_mo_direct(c, i, &mo);
+            st[i] = 1;
+            if (mo.found) {
+                opl[i] = mo.op + 1u;
+                lin[i] = mo.line;
+            }
+        }
+        fr[0].v = i;
+        fr[0].e = 0;
+        fp = 1;
+        while (fp && !c->err) {
+            ck_frame_t *t = &fr[fp - 1u];
+            otc_fx_t *vx = FX(c, t->v);
+            int pushed = 0;
+            if (opl[t->v]) {
+                st[t->v] = 2;
+                fp--;
+                continue;
+            }
+            while (t->e < vx->ncg) {
+                const otc_edge_t *ed = PTR(c, otc_edge_t, vx->cg) + t->e;
+                otc_fx_t *gx = FX(c, ed->g);
+                if (gx->cyclic || st[ed->g] == 1) {
+                    t->e++;
+                    continue;
+                }
+                if (!st[ed->g]) {
+                    io_t mo;
+                    ck_mo_direct(c, ed->g, &mo);
+                    st[ed->g] = 1;
+                    if (mo.found) {
+                        opl[ed->g] = mo.op + 1u;
+                        lin[ed->g] = mo.line;
+                    }
+                    fr[fp].v = ed->g;
+                    fr[fp].e = 0;
+                    fp++;
+                    pushed = 1;
+                    break;
+                }
+                if (opl[ed->g]) {                     /* the callee has one: its op, at the line of this call */
+                    opl[t->v] = opl[ed->g];
+                    lin[t->v] = ed->line;
+                    break;
+                }
+                t->e++;
+            }
+            if (pushed)
+                continue;
+            st[t->v] = 2;
+            fp--;
+        }
+    }
+    for (i = 0; i < n && !c->err; i++) {
+        if ((FNI(c, i)->flags & OTC_FF_REG) && ck_live_nib(c, FNI(c, i)) && opl[i]) {
+            mb_begin(c);
+            mb_lit(c, "op ");
+            mb_rstr(c, otc_reg[opl[i] - 1u].shown);
+            mb_lit(c, " not allowed in a live script");
+            cc_func_err(c, FX(c, i)->func, lin[i], mb_end(c), 0);
+        }
+    }
+    return c->err == 0;
+}
+
+/* ---- pass_events ---------------------------------------------------------------------------------------
+ * note.num/note.vel/note.ch only in an `in note` block, cc.num/cc.val/cc.ch only in an `in cc` block.
+ * tools/otype.py Program.pass_events is the twin: the top-level lines of the body, each with its whole subtree. */
+typedef struct { uint32_t fn; int kind; int num; } ev_t;
+
+static void ck_ev_visit(otc_comp_t *c, void *ctx, uint32_t node, uint32_t line)
+{
+    ev_t *ev = (ev_t *)ctx;
+    const otc_node_t *nd = ND(c, node);
+    if (nd->kind != OTC_N_OP)
+        return;
+    if (ev->kind != OTC_IK_NOTE &&
+        (ck_name_is(nd->op, "NOTE.NUM") || ck_name_is(nd->op, "NOTE.VEL") || ck_name_is(nd->op, "NOTE.CH"))) {
+        mb_begin(c);
+        mb_rstr(c, otc_reg[nd->op].shown);
+        mb_lit(c, " only allowed in an in note block");
+        cc_func_err(c, ev->fn, line, mb_end(c), 0);
+    } else if (ev->kind != OTC_IK_CC &&
+               (ck_name_is(nd->op, "CC.NUM") || ck_name_is(nd->op, "CC.VAL") || ck_name_is(nd->op, "CC.CH"))) {
+        mb_begin(c);
+        mb_rstr(c, otc_reg[nd->op].shown);
+        mb_lit(c, " only allowed in an in cc block");
+        cc_func_err(c, ev->fn, line, mb_end(c), 0);
+    } else if (ev->kind != OTC_IK_TRIG && ck_name_is(nd->op, "TRIG.STEP")) {
+        mb_begin(c);
+        mb_rstr(c, otc_reg[nd->op].shown);
+        mb_lit(c, " only allowed in an in trig block");
+        cc_func_err(c, ev->fn, line, mb_end(c), 0);
+    } else if ((ev->kind != OTC_IK_TRIG || ev->num == 2) && ck_name_is(nd->op, "TRIG.HIT")) {
+        mb_begin(c);
+        mb_rstr(c, otc_reg[nd->op].shown);
+        mb_lit(c, " only allowed in an in trig or in trig all block");
+        cc_func_err(c, ev->fn, line, mb_end(c), 0);
+    } else if ((ev->kind != OTC_IK_TRIG || ev->num != 2) && ck_name_is(nd->op, "TRIG.VAL")) {
+        mb_begin(c);
+        mb_rstr(c, otc_reg[nd->op].shown);
+        mb_lit(c, " only allowed in an in trig script block");
+        cc_func_err(c, ev->fn, line, mb_end(c), 0);
+    }
+}
+
+static int ck_ev_kind(otc_comp_t *c, uint32_t fn, uint32_t ib)     /* the kind of the ib-th in block */
+{
+    uint32_t q, k = 1;
+    const otc_live_t *lv = FN(c, fn)->module_label ? PTR(c, otc_live_t, FN(c, fn)->module_label) : 0;
+    for (q = lv ? lv->ib_first : 0; q; q = PTR(c, otc_in_t, q)->next, k++)
+        if (k == ib)
+            return (int)PTR(c, otc_in_t, q)->kind;
+    return 0;
+}
+
+static int ck_ev_num(otc_comp_t *c, uint32_t fn, uint32_t ib)      /* the ib-th in block's genre (in trig) */
+{
+    uint32_t q, k = 1;
+    const otc_live_t *lv = FN(c, fn)->module_label ? PTR(c, otc_live_t, FN(c, fn)->module_label) : 0;
+    for (q = lv ? lv->ib_first : 0; q; q = PTR(c, otc_in_t, q)->next, k++)
+        if (k == ib)
+            return (int)PTR(c, otc_in_t, q)->num;
+    return 0;
+}
+
+static int ck_events(otc_comp_t *c)
+{
+    uint32_t i;
+    for (i = 0; i < c->nf && !c->err; i++) {
+        ev_t ev;
+        uint32_t l;
+        if (!(FNI(c, i)->flags & OTC_FF_REG))
+            continue;
+        ev.fn = FX(c, i)->func;
+        for (l = FN(c, ev.fn)->root_first; l; l = LN(c, l)->next) {
+            uint32_t sub;
+            ev.kind = LN(c, l)->ib ? ck_ev_kind(c, ev.fn, LN(c, l)->ib) : 0;
+            ev.num = LN(c, l)->ib ? ck_ev_num(c, ev.fn, LN(c, l)->ib) : 0;
+            sub = l;
+            while (sub && !c->err) {
+                const otc_line_t *ln = LN(c, sub);
+                uint32_t m, a;
+                for (m = ln->mods; m; m = ND(c, m)->next) {
+                    for (a = ND(c, m)->first; a; a = ND(c, a)->next)
+                        ck_walk_expr(c, a, ln->no, ck_ev_visit, &ev);   /* (a CTX modifier's node is its first) */
+                }
+                if (ln->body && !(ln->flags & OTC_LF_DECL))
+                    ck_walk_expr(c, ln->body, ln->no, ck_ev_visit, &ev);
+                sub = cc_sub_next(c, sub, l);
+            }
         }
     }
     return c->err == 0;
@@ -1376,7 +1830,8 @@ static uint32_t cost_stmt(otc_comp_t *c, uint32_t fi, uint32_t s, const iv_t *en
 {
     const otc_node_t *nd = ND(c, s);
     switch (nd->kind) {
-    case OTC_N_ASSIGN: return cost_expr(c, fi, nd->first, env);
+    case OTC_N_ASSIGN:
+    case OTC_N_ASSIGN_VAR_NAMED: return cost_expr(c, fi, nd->first, env);
     case OTC_N_OPSTMT:
     case OTC_N_CALLSTMT:
     case OTC_N_CTXSTMT: return cost_expr(c, fi, nd->first, env);
@@ -1578,6 +2033,14 @@ CC_NOINLINE static void ck_cost(otc_comp_t *c)
             mb_dec(c, OTC_L_MENU_BUDGET);
             cc_func_err(c, FX(c, i)->func, f->line, mb_end(c), 0);
         }
+        if (f->module_line && cost > OTC_L_MODULE_BUDGET) {
+            mb_begin(c);
+            mb_lit(c, "too long: ");
+            mb_udec(c, cost);
+            mb_lit(c, "/");
+            mb_dec(c, OTC_L_MODULE_BUDGET);
+            cc_func_err(c, FX(c, i)->func, f->line, mb_end(c), 0);
+        }
     }
 }
 
@@ -1766,6 +2229,12 @@ CC_NOINLINE static void ck_run(otc_comp_t *c)
     if (c->err || !ck_graph(c))
         return;
     if (!ck_page(c))
+        return;
+    if (!ck_module(c))
+        return;
+    if (!ck_live(c))
+        return;
+    if (!ck_events(c))
         return;
     if (!ck_input_sample(c))
         return;

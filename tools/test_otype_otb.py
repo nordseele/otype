@@ -68,6 +68,16 @@ def ks_early | n
     if eq i n: ret add i 100
   ret 0
 
+def ks_gate
+  in gate ks_gate 1:
+    gate 2
+    out 1 3
+    a cv ks_gate 1
+
+def ks_cv
+  in clock 24:
+    a cv ks_gate 1
+
 def ks_hasp
   menu "KS" >> "HASP"
   param n 3 1 4
@@ -234,13 +244,41 @@ def ks_prm
 def ks_src_save
   input sample
   src.save
+
+def ks_mod
+  in clock 24:
+    nx.smp 3
+    nx.pl 2 64
+    play 1
+
+def ks_note
+  in note:
+    a note.num
+    b note.vel
+    c note.ch
+
+def ks_cc
+  in cc 1 1:
+    a cc.num
+    b cc.val
+    c cc.ch
+
+def ks_trig
+  in trig 1:
+    a trig.step
+    b trig.hit
+  in trig 2 all:
+    c trig.hit
 '''
 
 # each registry operation once, from its argument kinds (a statement, or `a <op>` for a value)
 _SAMPLE = {O.INT: "3", O.STEP: "3", O.TRACK: "2", O.SLOT: "5", O.PARAM: "2", O.VALUE: "64",
-           O.COND: "50%", O.PCT: "50", O.FILE: "1", O.STR: '"abc"', O.LIST: "{1 2 3}"}
+           O.COND: "50%", O.PCT: "50", O.FILE: "1", O.STR: '"abc"', O.LIST: "{1 2 3}",
+           O.CH: "1", O.VAL7: "64", O.VAL14: "1000", O.DUR: "24", O.OUT: "1", O.NAME: "FOO"}
 _HANDWRITTEN = {"?", "TRK", "STEPS", "STEP", "SEED", "RAND.SEED", "TOSS.SEED", "PROB.SEED",
-                "DRUNK.SEED", "FILE.SEED", "DIR", "EXT", "MATCH", "MSG", "SRC.SAVE"}
+                "DRUNK.SEED", "FILE.SEED", "DIR", "EXT", "MATCH", "MSG", "SRC.SAVE",
+                "NX.SMP", "NX.PL", "NOTE.NUM", "NOTE.VEL", "NOTE.CH", "CC.NUM", "CC.VAL", "CC.CH",
+                "TRIG.STEP", "TRIG.HIT", "TRIG.VAL", "GATE", "OUT", "CV"}
 
 
 def per_op_script():
@@ -379,6 +417,17 @@ class TestFormat(Base):
         bb = self.t_ex.fmap["BOOMBAP"]
         self.assertTrue(bb.touches & otb.TOUCH_BITS["SLOTS"])
         self.assertTrue(bb.families & otb.FAMILY_BITS["IO_R"])
+
+    def test_launch_ends_the_aux_data(self):
+        prog = otype.check_sources([("L.OTY", 'def beat\n  launch 384\n  in clock 96:\n    play 1\n')])
+        c = otb.compile_program(prog)
+        f = otb.parse(c.data).funcs[0]
+        self.assertEqual(f.launch, 384)
+        self.assertTrue(f.flags & otb.F_LAUNCH)
+        c2 = otb.compile_program(otype.check_sources([("L.OTY", 'def beat\n  in clock 96:\n    play 1\n')]))
+        self.assertFalse(otb.parse(c2.data).funcs[0].flags & otb.F_LAUNCH)
+        self.assertEqual(otb.parse(c2.data).funcs[0].launch, None)
+        self.assertEqual(len(c2.data), len(c.data) - 2)     # the 2 bytes of the launch tail
 
     def test_names_fit(self):
         for f in self.t_ex.funcs:
@@ -633,7 +682,8 @@ class TestCoverage(Base):
 
     def test_every_registry_operation_is_compiled(self):
         allops = {o.name for o in O.ALL_OPS}
-        self.assertEqual(sorted(allops - set(self.c_k.used_ops)), [])
+        # trig.val only lives in an `in trig t script:` block, which 1.1 refuses: no source compiles it
+        self.assertEqual(sorted(allops - set(self.c_k.used_ops) - {"TRIG.VAL"}), [])
 
     def test_every_registry_id_appears_in_a_table(self):
         ids = set()
@@ -644,7 +694,7 @@ class TestCoverage(Base):
                         ids.add((ops[0], ops[1]))
         # `?`, dir, ext, match, msg are compiled to sel / dir / ext / match / msg (no id in the code)
         native = {O.OPS[n].id for n in ("?", "DIR", "EXT", "MATCH", "MSG")}
-        missing = {o.id for o in O.ALL_OPS} - ids - native
+        missing = {o.id for o in O.ALL_OPS if o.name != "TRIG.VAL"} - ids - native      # trig.val: see above
         self.assertEqual(sorted(missing), [])
 
     def test_opcodes_are_unique_one_byte(self):
@@ -1345,7 +1395,7 @@ class TestProfile(unittest.TestCase):
     def test_m1_includes_v1_machine_ops_and_msg(self):
         """The v1 machine profile includes every implemented operation, msg (the end box text) among them."""
         m1 = self.REAL_M1
-        self.assertEqual(len(m1), 177)
+        self.assertEqual(len(m1), len(O.ALL_OPS))
         self.assertEqual(sorted(o.name for o in O.ALL_OPS if o.name not in m1), sorted(O._M1_NO_OPS))
         self.assertIn("DR.V", m1)
         self.assertIn("TRK.SLOT", m1)
@@ -1354,7 +1404,9 @@ class TestProfile(unittest.TestCase):
         for n in ("TR.ADD", "SMP.SET", "HAS.SMP", "STATIC.LOAD", "DIR", "ER", "PL.SET", "PL.GET", "PL.DEL", "PL.RND",
                   "PL.VARY", "PL.CLR", "TL.ADD", "TL.FILL", "HAS.LOCK", "PB", "AMP", "AMP.VOL", "LFO.DEP", "FX2",
                   "PAR.SET", "LFO.DEST", "FX.TYPE", "SCN.CLR", "TRK.INIT", "TRK.TYPE",
-                  "COND.SET", "COND.RND", "MICRO.SET", "MICRO.RND", "RATCH.SET", "TRK.SLOT", "TEMPO"):
+                  "COND.SET", "COND.RND", "MICRO.SET", "MICRO.RND", "RATCH.SET", "TRK.SLOT", "TEMPO",
+                  "RT.ADD", "RT.DEL", "RT.CLR", "RT.SRC", "RO.ADD", "RO.DEL", "REC.SRC", "REC.LEN",
+                  "REC.TRIG", "REC.LOOP", "REC.ARM", "SEND.NRPN", "MIDI.CC", "MIDI.NOTE", "MIDI.VEL"):
             self.assertIn(n, m1)
         self.assertTrue(O.in_profile(O.OPS["TEMPO"], None))
         self.assertTrue(O.in_profile(O.OPS["TEMPO"], m1))

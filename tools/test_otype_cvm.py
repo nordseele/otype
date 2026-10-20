@@ -237,8 +237,10 @@ class Start:
 
 
 def writable(i):
-    """Offsets of a TRAC block the trig / sample-lock operations may write: masks, records, words."""
-    return i < 0x20 or 0x40 <= i < 0x50 or i == 0x52 or 0x59 <= i < 0x59 + 0x800 or 0x89A <= i < 0x91A
+    """Offsets of a TRAC block the trig / sample-lock / recorder-trig operations may write: masks (the
+    recorder one-shot flag at +0x38 included), records, words, the recorder micro-timing bytes."""
+    return (i < 0x40 or 0x40 <= i < 0x50 or i == 0x52 or 0x59 <= i < 0x59 + 0x800
+            or 0x859 <= i < 0x859 + 64 or 0x89A <= i < 0x91A)
 
 
 _SPY = {}
@@ -407,7 +409,8 @@ def compare_press(tc, cv, prog, name, seed, state, track, length, start, mtypes,
         if r1[1] in inv_audio:
             want = inv_audio[r1[1]]
         else:
-            want = cvm.E_COST if "run too long" in r1[1] else cvm.E_ARG if "has never been saved" in r1[1] else cvm.E_TABLE
+            want = (cvm.E_COST if "run too long" in r1[1]
+                    else cvm.E_ARG if ("has never been saved" in r1[1] or "same pattern" in r1[1]) else cvm.E_TABLE)
         tc.assertEqual(r2, ("error", want), what + " " + r1[1])
         return None
     tc.assertFalse(isinstance(r2, tuple), what + " C error %r" % (r2,))
@@ -1209,6 +1212,7 @@ class TestHeader(unittest.TestCase):
                   "STEPS", "STEP", "STEP.CUR", "TRK.CUR", "PAT.LEN", "?",
                   "TR.ADD", "TR.DEL", "TR.FLIP", "TR.CLR", "HAS.TRIG", "HAS.LOCK", "HAS.SMP", "IS.EMPTY",
                   "TRK.TYPE", "SMP.SET", "SMP.GET", "SMP.DEL", "SMP.RND", "SMP.CLR",
+                  "RO.ADD", "RO.DEL", "REC.TRIG", "REC.LOOP", "REC.ARM",
                   # the p-locks and the trigless locks
                   "PL.SET", "PL.GET", "PL.DEL", "PL.RND", "PL.VARY", "PL.CLR", "TL.ADD", "TL.FILL",
                   # the part
@@ -1230,10 +1234,13 @@ class TestHeader(unittest.TestCase):
                           "SMP.RND", "SMP.CLR", "PL.SET", "PL.GET", "PL.DEL", "PL.RND", "PL.VARY", "PL.CLR",
                           "TL.ADD", "TL.FILL", "PAR.SET", "LFO.DEST", "FX.TYPE",
                           "SCN.CLR", "TRK.INIT", "TRK.SLOT", "TEMPO", "COND.SET", "COND.RND", "MICRO.SET", "MICRO.RND", "RATCH.SET",
+                          "RT.ADD", "RT.DEL", "RT.CLR", "RT.SRC", "RO.ADD", "RO.DEL",
+                          "REC.SRC", "REC.LEN", "REC.TRIG", "REC.LOOP", "REC.ARM", "PAT.COPY",
                           "DIR", "STATIC.LOAD", "STATIC.FREE", "STATIC.FIRSTFREE",
                           "STATIC.CLR"}
                          | set(gen_ops_c.V1_EXTRA)
-                         | set(gen_ops_c.AUDIO_EXTRA))
+                         | set(gen_ops_c.AUDIO_EXTRA)
+                         | set(gen_ops_c.MODULE_EXTRA))
 
 
 class TestCorpus(Base):
@@ -1297,7 +1304,8 @@ class TestCorpus(Base):
         seen = {(a, b) for a, b in {(o[0], o[1]) for o in COV["op"]} | {(o[0], o[1]) for o in COV["opv"]}
                 | {(o[0], o[1]) for o in COV["set"]}}
         sup = [o for o in O.ALL_OPS if gen_ops_c.supported(o)]
-        missing = sorted(o.shown for o in sup if o.id not in seen and o.name != "?")
+        # `?` compiles to `sel`; trig.val only lives in an `in trig t script:` block, refused in 1.1
+        missing = sorted(o.shown for o in sup if o.id not in seen and o.name not in ("?", "TRIG.VAL"))
         print("[cvm] supported ops never exercised: %s" % (", ".join(missing) or "none"))
         ins_all = {i.name for i in otb.INSTRS}
         print("[cvm] instructions never executed: %s"
@@ -3296,6 +3304,90 @@ class TestPage(Base):
         self.assertEqual(self.cv.lib.otc_vm_fn_page(self.cv.ptr, 0, None), 4)
 
 
+class TestPatternCopy(Base):
+    """`pat.copy a b` (spec 8): one host action (OTB's control_action), the stock paste of the whole pattern record;
+    `a == b` is a refused argument (OTC_E_ARG), outside 1..16 is out of range."""
+
+    def _bind_pattern1(self):
+        blocks = {}
+        for k in range(1, 9):
+            b = bytearray(sim.RAM_TRAC_SIZE)
+            b[0x40:0x48] = sim.SWING_DEFAULT.to_bytes(8, "big")
+            b[0x50] = 16
+            b[0x59:0x859] = bytes([255]) * 0x800
+            blocks[k] = b
+        blocks[1][0x07] = 0b00000100                     # a trig on step 3, track 1
+        blocks[2][0x07] = 0b00000010                     # a trig on step 2, track 2
+        for k in range(1, 9):
+            self.cv.bind(k, blocks[k], 0)
+        return blocks
+
+    def test_the_copy_moves_the_whole_pattern(self):
+        src = ('def cp\n  menu "PAT" >> "COPY"\n  pat.copy 1 2\n'
+               'def same\n  menu "PAT" >> "SAME"\n  pat.copy 2 2\n'
+               'def far\n  menu "PAT" >> "FAR"\n  pat.copy 1 17\n')
+        _p, c, t = compile_sources([("P.OTY", src)])
+        self.assertEqual([str(d) for d in c.diags], [])
+        self.assertEqual(self.cv.load(c.data), 0)
+        hp = self.cv.params
+        hp.track_blocks.clear()
+        src_blocks = self._bind_pattern1()
+        r = self.cv.run("cp", 1)
+        self.assertFalse(isinstance(r, tuple), r)
+        bank, pat = 1, 1
+        after = hp.track_blocks[(bank, 2)]
+        self.assertEqual(list(after[1]), list(src_blocks[1]))     # the destination = the source, byte for byte
+        self.assertEqual(list(after[2]), list(src_blocks[2]))
+        self.assertEqual(after[1][0x07], 0b00000100)
+        self.assertEqual(hp.track_blocks[(bank, 1)][1][0x07], 0b00000100)   # the source keeps its bytes
+        # a == b: refused, the run stops, nothing is written
+        self.assertEqual(self.cv.run("same", 1), ("error", cvm.E_ARG))
+        self.assertEqual(list(hp.track_blocks[(bank, 2)][1]), list(after[1]))
+        # outside 1..16: out of range, counted, the run goes on
+        r = self.cv.run("far", 1)
+        self.assertEqual([o["op"] for o in r["out_of_range"]], ["pat.copy"])
+
+
+class TestLaunch(Base):
+    """`launch N` (spec 4, 14.1): flag bit 0x80 and its 2 bytes end the aux data; `otc_vm_fn_launch` reads what
+    `otb.parse` reads, after the var and param-source tails."""
+
+    def raw_load(self, data):
+        buf = ctypes.create_string_buffer(bytes(data), len(data))
+        self._keep = buf
+        return self.cv.lib.otc_vm_load(self.cv.ptr, buf, len(data))
+
+    def test_the_query_reads_the_table(self):
+        src = ('def la\n  launch 384\n  in clock 96:\n    tr.add 1\n'
+               'def lb\n  in clock 24:\n    tr.add 2\n'
+               'def lc\n  menu "M" >> "X"\n  tr.add 3\n')
+        _p, c, t = compile_sources([("L.OTY", src)])
+        self.assertEqual(([str(d) for d in c.diags], t.nfunc), ([], 3))
+        self.assertEqual(self.cv.load(c.data), 0)
+        self.assertEqual([self.cv.fn_launch(i) for i in range(t.nfunc)], [384, 0, 0])
+        self.assertEqual([f.launch for f in t.funcs], [384, None, None])
+        self.assertEqual(self.cv.fn_launch("la"), 384)                  # the other tails are untouched
+        self.assertEqual(self.cv.fn_clock("la"), 96)
+        self.assertEqual(self.cv.lib.otc_vm_fn_launch(self.cv.ptr, t.nfunc), 0)
+        self.assertEqual(self.raw_load(c.data), 0)
+
+    def test_the_launch_bytes_are_after_the_var_and_param_source_tails(self):
+        src = ('def ld\n  launch 96\n  param v 7 0 9 cc 1 74\n  in clock 48:\n    var k 3\n'
+               '    tr.add add k v\n')
+        _p, c, t = compile_sources([("L.OTY", src)])
+        self.assertEqual([str(d) for d in c.diags], [])
+        self.assertEqual(self.cv.load(c.data), 0)
+        self.assertEqual(self.cv.fn_launch("ld"), 96)
+        self.assertEqual(self.cv.fn_clock("ld"), 48)
+        self.assertEqual(t.funcs[0].launch, 96)                          # the Python decoder agrees
+
+    def test_an_old_table_still_loads(self):
+        # no flag bit 0x80: the table is read as before (a VM that ignores the bit reads the aux the same way)
+        _p, c, t = compile_sources([("L.OTY", 'def lb\n  in clock 24:\n    tr.add 2\n')])
+        self.assertEqual(self.cv.load(c.data), 0)
+        self.assertEqual(self.cv.fn_launch("lb"), 0)
+
+
 class TestConfirm(Base):
     """`confirm "TEXT"` (spec 14.1): `otc_vm_fn_confirm` reads what `otb.parse` reads, the loader checks the flag bit 2 and the
     text's offset after the page label."""
@@ -3766,6 +3858,62 @@ class TestM3a(Base):
         compare_table(self, self.cv, table, c.data, st, variants=((1, 16), (2, 64, {2: PICKUP})))
         self.assertEqual((st.skipped, st.funcs), (0, 17))
 
+    def test_rt_ops_agree(self):
+        src = "def f\n  rt.add 1\n  rt.add 5 2\n  rt.src 1 1\n  rt.del 5\n"
+        self.agrees(src, blank())
+
+    def test_rt_del_clears_the_oneshot_flag_and_the_recorder_micro_byte(self):
+        """rt.del on a step that also carries an audio trig: the four recorder masks and the recorder
+        micro-timing byte (+0x859) go, in RAM and in the SRAM copy; the playback trig word stays."""
+        b = self.trigged(1)
+        set_bit(b[1], 0x38, 1)                       # the recorder one-shot flag of step 1
+        b[1][0x859] = 0xFA                           # a recorder micro-timing byte (-6)
+        src = "def f\n  micro.set 1 5\n  rt.del 1\n"
+        r, after = self.go(src, b, with_copy=True)
+        a = after[1]
+        self.assertEqual([get_bit(a, m, 1) for m in (0x00, 0x20, 0x28, 0x30, 0x38)], [1, 0, 0, 0, 0])
+        self.assertEqual(a[0x859], 0)
+        self.assertEqual(self.cv.copy_blocks()[1], a)  # the SRAM copy holds the same bytes
+        self.assertEqual(sim.decode_ram_block(a).micro.get(1), 5)   # the playback micro-timing is not a recorder setting
+        self.assertEqual(r["touched"], {1})
+        self.agrees(src, b)
+
+    def test_ro_ops_agree(self):
+        src = "def f\n  ro.add 1\n  ro.add 5 2\n  ro.del 5\n"
+        self.agrees(src, blank())
+
+    def test_ro_add_sets_the_one_shot_state_and_rt_add_leaves_it(self):
+        """ro.add is rt.add plus TRAC +0x38: the bit, and only it, separates the two families."""
+        r, after = self.go("def f\n  ro.add 1\n  rt.add 2\n", blank(), with_copy=True)
+        a = after[1]
+        self.assertEqual([get_bit(a, m, 1) for m in (0x20, 0x28, 0x30, 0x38)], [1, 1, 1, 1])
+        self.assertEqual([get_bit(a, m, 2) for m in (0x20, 0x28, 0x30, 0x38)], [1, 1, 1, 0])
+        self.assertEqual(self.cv.copy_blocks()[1], a)               # the SRAM copy holds the same bytes
+        self.assertEqual(r["touched"], {1})
+        # ro.del on a one-shot trig the way rt.del does: the four masks and the recorder micro-timing byte go
+        b = blank()
+        set_bit(b[1], 0x38, 1)
+        b[1][0x859] = 0xFA
+        _r, after = self.go("def f\n  ro.del 1\n", b, with_copy=True)
+        self.assertEqual([get_bit(after[1], m, 1) for m in (0x20, 0x28, 0x30, 0x38)], [0, 0, 0, 0])
+        self.assertEqual(after[1][0x859], 0)
+        self.assertEqual(self.cv.copy_blocks()[1], after[1])
+        # the mask bounds are rt.add's (1..7, refused once, nothing written)
+        r, after = self.go("def f\n  a 0\n  b 8\n  ro.add 1 a\n  ro.add 2 b\n", blank())
+        self.assertEqual([o["op"] for o in r["out_of_range"]], ["ro.add", "ro.add"])
+        self.assertEqual([get_bit(after[1], m, s) for s in (1, 2) for m in (0x20, 0x28, 0x30, 0x38)], [0] * 8)
+        self.agrees("def f\n  a 0\n  b 8\n  ro.add 1 a\n  ro.add 2 b\n", blank())
+
+    def test_rt_src_bounds_agree(self):
+        """A source mask outside 1..7 is refused (counted out of range) by both engines, once per call, and
+        writes nothing; 7 stays the whole thing."""
+        src = "def f\n  rt.add 1 0\n  rt.src 2 8\n  rt.add 3 7\n"
+        r, after = self.go(src, blank())
+        self.assertEqual([o["op"] for o in r["out_of_range"]], ["rt.add", "rt.src"])
+        self.assertEqual([get_bit(after[1], m, 3) for m in (0x20, 0x28, 0x30)], [1, 1, 1])
+        self.assertEqual([get_bit(after[1], m, s) for s in (1, 2) for m in (0x20, 0x28, 0x30)], [0] * 6)
+        self.agrees(src, blank())
+
 
 class TestM3aMustFail(Base):
     """The p-lock tests have teeth: the library built with one wrong rule each (OTC_SABOTAGE_PL*, TLWORD) is caught
@@ -3953,6 +4101,73 @@ class TestM3b(Base):
         self.assertEqual([e for e in hp.log if e[0] == "scene"],
                          [("scene", 3, s, b, 0xFF) for s in range(16) for b in range(32)])
         self.assertEqual(r["part_touched"], {4})
+
+    def test_rec_src_and_rec_len_agree(self):
+        src = "def f\n  rec.src 1 1 2\n  rec.src 1 2 3\n  rec.src 1 3 1\n  rec.len 1 4\n"
+        self.agrees(src)
+
+    def test_rec_trig_and_rec_loop_write_the_part_bytes(self):
+        """rec.trig / rec.loop land in the recorder setup block of the part, at the bytes RECORDING SETUP 1
+        shows (+3 TRIG, +5 LOOP), and the simulator stores the same."""
+        src = "def f\n  rec.trig 1 1\n  rec.loop 1 1\n  rec.trig 2 2\n  rec.loop 8 1\n"
+        r, hp = self.go(src)
+        self.assertEqual(r["part_touched"], {1, 2, 8})
+        self.assertEqual(hp.parts[1].rec_setup, {3: 1, 5: 1})
+        self.assertEqual((hp.parts[2].rec_setup, hp.parts[8].rec_setup), ({3: 2}, {5: 1}))
+        self.assertEqual([e for e in hp.log if e[0] == "control"],
+                         [("control", 0, "REC.TRIG", 0, 1), ("control", 0, "REC.LOOP", 0, 1),
+                          ("control", 1, "REC.TRIG", 0, 2), ("control", 7, "REC.LOOP", 0, 1)])
+        self.agrees(src)
+        bad = self.go("def f\n  a 9\n  rec.trig a 0\n  rec.trig 1 3\n  rec.loop 1 2\n")
+        self.assertEqual([o["op"] for o in bad[0]["out_of_range"]], ["rec.trig", "rec.trig", "rec.loop"])
+        self.assertEqual((bad[0]["part_touched"], bad[1].parts[1].rec_setup), (set(), {}))
+        self.agrees("def f\n  a 9\n  rec.trig a 0\n  rec.trig 1 3\n  rec.loop 1 2\n")
+
+    def test_midi_reads_answer_the_host_tables(self):
+        """midi.cc / midi.note / midi.vel read what the MIDI IN hook stored: the simulator's model and the C
+        side's tables answer the same, 0 where nothing came in."""
+        src = "def f\n  x midi.cc 1 74\n  y midi.note 2\n  z midi.vel 2\n  t midi.cc 3 0\n"
+        self.cv.midi_in(1, 74, 64)               # CC 74 = 64 on channel 1
+        self.cv.midi_in(2, 60, 100)              # note 60 velocity 100 on channel 2
+        m = sim.Model()
+        m.midi_cc[(1, 74)] = 64
+        m.midi_note[2], m.midi_vel[2] = 60, 100
+        prog, c, _t = compile_sources([("M.OTY", src)])
+        self.assertEqual(self.cv.load(c.data), 0)
+        r = self.cv.run("f", 0, 1, 16)
+        self.assertEqual([r["globals"][k] for k in "xyzt"], [64, 60, 100, 0])
+        py = sim.simulate(prog, "f", seed=0, model=m)
+        self.assertEqual([py.globals[k] for k in "xyzt"], [64, 60, 100, 0])
+        self.cv.midi_in_clear()
+        self.assertEqual([self.cv.run("f", 0, 1, 16)["globals"][k] for k in "xyzt"], [0, 0, 0, 0])
+
+    def test_send_nrpn_and_send_cc_hand_the_same_bytes_to_the_host(self):
+        """send.nrpn is the four Control Changes 99, 98, 6, 38 -- all four, MSB first, and nothing else."""
+        src = "def f\n  send.nrpn 1 300 16383\n  send.cc 2 10 64\n  send.nrpn 16 0 1\n"
+        got = []
+        self.cv.bind_midi_out(lambda kind, *a: got.append((kind,) + a))
+        prog, c, _t = compile_sources([("M.OTY", src)])
+        self.assertEqual(self.cv.load(c.data), 0)
+        self.cv.run("f", 0, 1, 16)
+        self.cv.bind_midi_out(None)
+        self.assertEqual(got, [("cc", 1, 99, 2), ("cc", 1, 98, 44), ("cc", 1, 6, 127), ("cc", 1, 38, 127),
+                               ("cc", 2, 10, 64),
+                               ("cc", 16, 99, 0), ("cc", 16, 98, 0), ("cc", 16, 6, 0), ("cc", 16, 38, 1)])
+        py = sim.simulate(prog, "f", seed=0)
+        self.assertEqual([(k,) + tuple(a) for _tick, k, *a in py.midi_out], got)
+
+    def test_rec_arm_starts_a_recording_on_every_context_track(self):
+        r, hp = self.go("def f\n  rec.arm 2\n  rec.arm 1 3\n  rec.arm 8 5\n")
+        self.assertEqual(hp.rec_arms, [(2, 7), (1, 3), (8, 5)])
+        self.assertEqual([e for e in hp.log if e[0] == "control"], [])
+        self.assertEqual((r["part_touched"], r["touched"]), (set(), set()))   # it writes no part byte and no pattern byte
+        bad = self.go("def f\n  a 0\n  rec.arm 1 a\n  b 9\n  rec.arm b\n  c 8\n  rec.arm 1 c\n")
+        self.assertEqual([o["op"] for o in bad[0]["out_of_range"]], ["rec.arm", "rec.arm", "rec.arm"])
+        self.assertEqual(bad[1].rec_arms, [])
+        # the simulator's own record of the arms is the same list
+        prog, c, _table = compile_sources([("M.OTY", "def f\n  rec.arm 2\n  rec.arm 1 3\n")])
+        res = sim.simulate(prog, "f", seed=0)
+        self.assertEqual(res.model.rec_arms, [(2, 7), (1, 3)])
 
     def test_trk_init_resets_order(self):
         pm = sim.ParamModel({(1, 0): (0, 128, False), (1, AMP_VOL): (10, 20, True)},

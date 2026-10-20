@@ -2,7 +2,7 @@
   "name": "otype",
   "displayName": "OType",
   "description": "OType, scripting for the Octatrack: syntax, live checking, completion, hover, signature help.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "nordseele",
   "license": "GPL-3.0-only",
   "engines": {

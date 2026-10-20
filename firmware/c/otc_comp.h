@@ -147,12 +147,36 @@ typedef struct {                  /* a `param` of a function (declaration order)
     uint32_t labels[16];          /* OPTION: string refs of labels */
     uint8_t kind;                 /* OTC_PK_* */
     uint8_t nlabels;              /* OPTION: number of choices (2..16) */
-    uint8_t pad[2];
+    uint8_t src_kind;             /* bound MIDI source: 0 none, 1 cc, 2 note, 3 vel */
+    uint8_t src_ch, src_num;      /* its channel (1..16) and, for cc, its number (0..127) */
+    uint8_t pad;
 } otc_param_t;
 
 typedef struct {                  /* a `menu` of a function: the levels (a chain of cells), then the action */
     uint32_t next, line, action, nlevels, lfirst;
 } otc_menu_t;
+
+typedef struct {                  /* a `var` of a function (declaration order); scope 0 = the function, else 1 + index of its in block */
+    uint32_t next, name, slot, line, scope;
+    int32_t init;
+} otc_var_t;
+
+enum { OTC_IK_CLOCK = 1, OTC_IK_NOTE = 2, OTC_IK_CC = 3, OTC_IK_TRIG = 4, OTC_IK_GATE = 5 };
+
+typedef struct {                  /* an `in` block of a live script (`in clock N:`, `in note [ch]:`, `in cc ch n:`, `in trig t [all|script]:`, `in gate NAME n:`) */
+    uint32_t next, line, ticks, ch, num;   /* GATE: ch = the output 1..4, num unused */
+    uint32_t name, namelen;       /* GATE: string ref of the master's function name (upper case) and its length */
+    uint8_t kind;                 /* OTC_IK_* */
+    uint8_t pad[3];
+} otc_in_t;
+
+typedef struct {                  /* what only a live script needs (allocated for one): its vars, its in blocks, its launch,
+                                   * and the line of its last `confirm` declaration (the confirm checks name it) */
+    uint32_t var_first, var_last, nvars;
+    uint32_t ib_first, ib_last, nib;
+    uint32_t launch_line, launch_ticks;
+    uint32_t confirm_decl_line;
+} otc_live_t;
 
 typedef struct {                  /* a level of a menu: string ref */
     uint32_t next, ref;
@@ -172,7 +196,10 @@ typedef struct {
     uint32_t param_first, param_last, nparams;
     uint32_t menu_first, menu_last, nmenus;
     uint32_t page_line, page_label;   /* line of the `page "LABEL"` declaration (0: none) and the string ref of its label */
-    uint32_t confirm_line, confirm_text;   /* the first `confirm "TEXT"` with a non-empty text: its line (0: none), its string ref */
+    uint32_t module_line;         /* line of the first `in` block (0: not a live script) */
+    uint32_t module_label;        /* otc_live_t offset of a live script or of a function with a `launch`/`confirm` (0: none) */
+    uint32_t clock_line, clock_ticks;   /* line of the `clock N` declaration (0: none) and ticks value */
+    uint32_t confirm_line, confirm_text;   /* the line of the last `confirm` declaration (0: none); the FIRST non-empty text's string ref (0: none) */
     uint16_t file;
     uint8_t flags;                /* OTC_FF_* */
     uint8_t pad;
@@ -182,7 +209,7 @@ enum {
     OTC_N_NUM = 1, OTC_N_STR, OTC_N_LIST, OTC_N_COND, OTC_N_VAR, OTC_N_ARG, OTC_N_PARAM, OTC_N_CONST,
     OTC_N_OP, OTC_N_CALL, OTC_N_KW, OTC_N_PRED,
     OTC_N_ASSIGN, OTC_N_OPSTMT, OTC_N_CALLSTMT, OTC_N_CTXSTMT, OTC_N_SETSTMT, OTC_N_BREAK, OTC_N_STOP, OTC_N_RET,
-    OTC_N_DECL,
+    OTC_N_DECL, OTC_N_VAR_NAMED, OTC_N_ASSIGN_VAR_NAMED,
     OTC_N_M_IF, OTC_N_M_ELIF, OTC_N_M_ELSE, OTC_N_M_L, OTC_N_M_EACH, OTC_N_M_PROB, OTC_N_M_EVERY, OTC_N_M_SKIP,
     OTC_N_M_CTX
 };
@@ -205,8 +232,9 @@ typedef struct {                  /* a line of a body (Python's Line) */
     uint32_t mods;                /* the first modifier node (chain through `next`) */
     uint32_t body;                /* the declaration node (OTC_LF_DECL) or the statement node, or 0 */
     uint32_t child_first, child_last, next, parent;
+    uint16_t ib;                  /* 1 + index of the in block this line belongs to (0: none) */
     uint8_t flags;                /* OTC_LF_* */
-    uint8_t pad[3];
+    uint8_t pad;
 } otc_line_t;
 
 /* ---- the checker state ----------------------------------------------------------------------------- */
@@ -242,8 +270,9 @@ typedef struct {                  /* per function */
     uint8_t cyclic, onstack, destr, costed, cerr, direct;   /* cerr: 0 ok, 1 counters, 2 stack, 3 code length, 4 loop/pass depth, 5 context depth, 6 menus (dry run) */
     uint8_t bad, inorder;         /* bad: 0 accepted, 1 not on the unit yet, 2 compile error (cerr), 3 needs a refused function */
     uint8_t masked, iostate, io_op, srcstate;   /* pass_page; input_sample */
-    uint8_t src_op, pad2[3];
-    uint32_t io_line, src_line;
+    uint8_t src_op, modstate, mod_kind, mod_op; /* pass_module: mod_kind 1=op, 2=confirm */
+    uint8_t nxstate, nx_op, pad[2];             /* pass_module: nx.* only in module */
+    uint32_t io_line, src_line, mod_line, nx_line;
 } otc_fx_t;
 
 typedef struct { uint32_t next, f, callee, node, line; uint8_t have, want, pad[2]; } otc_defer_t;   /* a type error that waits for the end */
@@ -282,8 +311,15 @@ typedef struct {                  /* the header of the workspace */
     uint32_t lps[OTC_BLOCK_STACK + 1];           /* loop depth of the ancestors of a line (checker walk) */
     uint32_t stk_ind[OTC_BLOCK_STACK];     /* the block stack of the body parser: indentation, list owner */
     uint32_t stk_own[OTC_BLOCK_STACK];
+    uint16_t stk_ib[OTC_BLOCK_STACK];      /* the in block in effect at each level (0: none) */
+    uint32_t cur_ib;                       /* the in block of the line being parsed (0: none) */
     uint32_t fbucket[OTC_HBUCKETS];    /* function name -> first function of the name (registered ones) */
     uint32_t cbucket[OTC_HBUCKETS];    /* const name -> first const of the name */
 } otc_comp_t;
 
+/* the shared name rules (tools/otype.py name_problem), used by `in gate` and `cv` */
+int  cc_name_problem(const uint8_t *p, uint32_t n, int up, int is_word);
+void cc_np_text(otc_comp_t *c, int np, const uint8_t *p, uint32_t n, int up);
+
 #endif
+

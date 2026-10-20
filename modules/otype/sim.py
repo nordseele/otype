@@ -312,6 +312,7 @@ class PartData:
         self.fx1_setup = {}               # 1..6 -> val
         self.fx2_setup = {}               # 1..6 -> val
         self.scenes = {}                  # scene 1..16 -> {byte 0..31: value written} (NOT_LOCKED = 0xff = no lock)
+        self.rec_setup = {}               # RECORDING SETUP: byte offset 0, 1, 2, 4 -> val
 
     def scenes_json(self):
         out = {}
@@ -349,6 +350,8 @@ class PartData:
             d["fx1_setup"] = {str(k): v for k, v in sorted(self.fx1_setup.items())}
         if self.fx2_setup:
             d["fx2_setup"] = {str(k): v for k, v in sorted(self.fx2_setup.items())}
+        if self.rec_setup:
+            d["rec_setup"] = {str(k): v for k, v in sorted(self.rec_setup.items())}
         return d
 
 
@@ -467,6 +470,12 @@ class Model:
         self.audio_refuse = {}
         self.normalized = {}
         self.exists_files = set()
+        # what the MIDI IN hook has stored: the last CC per (channel, controller), the last note and its
+        # velocity per channel (the unit's otype_cc_table / otype_last_note / otype_last_vel)
+        self.midi_cc = {}
+        self.midi_note = {}
+        self.midi_vel = {}
+        self.rec_arms = []                # (track, source mask) of every rec.arm of the run
 
     @property
     def tempo(self):
@@ -928,6 +937,45 @@ class Run:
         self.fstates = {}
         self.bags = load_bags(self.state.get("bags"))      # file.pick bags, oldest first
         self.seed, self.seed_source = seed, seed_source
+        self.plays = []
+        self.nx_smp = None
+        self.nx_pl = {}
+        self.tick = 0
+        self.seq_running = False
+        self.seq_steps = {}
+        self.seq_mutes = {}
+        self.fn_vars = {}
+        self.saved_vars = copy.deepcopy(self.state.get("vars", {}))
+        self.current_event = None
+        self.midi_out = []
+        self.outs = [0, 0, 0, 0]        # the four outputs `out n v` publishes
+        self.gates = []                 # (tick, output) of each `gate n` of this run
+        self.module_outs = None         # name -> [4 values] of the running scripts (cv), when known
+
+    def record_gate(self, out):
+        if 1 <= out <= 4:
+            self.gates.append((self.tick, out))
+
+    def set_out(self, out, v):
+        if 1 <= out <= 4:
+            self.outs[out - 1] = sat(v)
+            if self.module_outs is not None:
+                self.module_outs[self.root.name] = list(self.outs)
+
+    def read_cv(self, name, out):
+        """The value `out` of the running script `name` (0 if it does not run / out of range)."""
+        if not (1 <= out <= 4) or not isinstance(name, str) or self.module_outs is None:
+            return 0
+        vals = self.module_outs.get(name.upper())
+        return vals[out - 1] if vals else 0
+
+    def record_play(self, t):
+        if self.nx_smp is None and not self.nx_pl:
+            self.plays.append((self.tick, t))
+        else:
+            self.plays.append((self.tick, t, self.nx_smp, dict(self.nx_pl)))
+        self.nx_smp = None
+        self.nx_pl = {}
 
     # ---- helpers -------------------------------------------------------------------------
     def fstate(self, fn):
@@ -1021,6 +1069,45 @@ class Run:
         taken = None
         for idx, ln in enumerate(lines):
             if ln.decl is not None or ln.error:
+                continue
+            if ln.in_block is not None:
+                ib = ln.in_block
+                ev = getattr(self, "current_event", None)
+                if ib.kind == "GATE":           # a gate block needs a gate event, event or not
+                    if not (isinstance(ev, dict) and ev.get("type") == "GATE") \
+                            or ev.get("gate.name") != ib.name or ev.get("gate.out") != ib.ch:
+                        continue
+                elif ev is not None:
+                    if ib.kind == "CLOCK":
+                        if ev.get("type") != "CLOCK":
+                            continue
+                    elif ib.kind == "NOTE":
+                        if not (isinstance(ev, dict) and ev.get("type") == "NOTE"):
+                            continue
+                        if ib.ch is not None and ev.get("ch") != ib.ch:
+                            continue
+                    elif ib.kind == "CC":
+                        if not (isinstance(ev, dict) and ev.get("type") == "CC"):
+                            continue
+                        if ib.ch is not None and ev.get("ch") != ib.ch:
+                            continue
+                        if ib.num is not None and ev.get("num") != ib.num:
+                            continue
+                    elif ib.kind == "TRIG":
+                        if not (isinstance(ev, dict) and ev.get("type") == "TRIG"):
+                            continue
+                        if ev.get("track") != ib.ch:
+                            continue
+                        g = ev.get("trig.genre", 0)
+                        if ib.num == 2:
+                            if g != 2:
+                                continue
+                        elif ib.num == 1:
+                            if g != 0:
+                                continue
+                        elif ev.get("trig.hit") != 1:
+                            continue
+                self.exec_block(ln.children, ctx.copy(), fr)
                 continue
             fk = ln.first_kind()
             if fk in ("IF", "ELIF", "ELSE"):
@@ -1126,6 +1213,14 @@ class Run:
                 fr.locals[s.name] = v
             else:
                 self.globals[s.name] = v
+        elif k == "assign_var_named":
+            v = self.eval(s.args[0], ctx, fr)
+            vars_dict = self.fn_vars.setdefault(fr.fn, {})
+            slot = getattr(s.var_info, "slot", None)
+            val = max(-32768, min(32767, v))
+            vars_dict[s.name] = val
+            if slot is not None:
+                vars_dict[slot] = val
         elif k == "opstmt":
             self.eval_op(s.node, ctx, fr)
         elif k == "callstmt":
@@ -1166,6 +1261,33 @@ class Run:
             if w == "I":
                 return it[-1] if it else 0
             return it[-2] if len(it) > 1 else 0
+        if k == "var_named":
+            vars_dict = self.fn_vars.setdefault(fr.fn, {})
+            slot = getattr(n.var_info, "slot", None)
+            if slot is not None and slot in vars_dict:
+                return vars_dict[slot]
+            if n.name in vars_dict:
+                return vars_dict[n.name]
+            fn_key = O.show(fr.fn.name)
+            saved = getattr(self, "saved_vars", {}).get(fn_key)
+            if saved is None:
+                saved = getattr(self, "saved_vars", {}).get(str(fr.fn.name).upper(), {})
+            if slot is not None and slot in saved:
+                val = saved[slot]
+            elif slot is not None and str(slot) in saved:
+                val = saved[str(slot)]
+            elif n.name in saved:
+                val = saved[n.name]
+            elif n.name.lower() in saved:
+                val = saved[n.name.lower()]
+            elif n.name.upper() in saved:
+                val = saved[n.name.upper()]
+            else:
+                val = n.var_info.init
+            vars_dict[n.name] = val
+            if slot is not None:
+                vars_dict[slot] = val
+            return val
         if k == "arg":
             return fr.args[n.name]
         if k == "param":
@@ -1606,6 +1728,35 @@ def _patgo(run, ctx, fr, n, v):
         run.length = run.model.pattern_lengths.get((b, p), 16)
 
 
+@handler("PAT.COPY")
+def _patcopy(run, ctx, fr, n, v):
+    """The stock paste: the whole pattern record of `a` replaces `b`'s (trigs, locks, length, part assigned);
+    the clipboard and the parts' data are untouched. a == b is a refused argument (the stock would write the
+    pattern onto itself), not an out-of-range one."""
+    a, b = v[0], v[1]
+    m = run.model
+    if not (1 <= a <= 16 and 1 <= b <= 16):
+        run.oor(n.op, n.line, fr)
+    elif a == b:
+        raise RunError("pat.copy: source and destination are the same pattern (%d)" % a)
+    else:
+        m.pattern_lengths[m.bank, m.pattern] = run.length       # the playing pattern keeps the length it has now
+        m.patterns[m.bank, m.pattern] = m.tracks
+        m.parts[m.bank, m.part_cur] = m.part
+        m.patterns[m.bank, b] = copy.deepcopy(m.patterns.setdefault((m.bank, a), {t: TrackData() for t in range(1, 9)}))
+        if (m.bank, a) in m.pattern_lengths:
+            m.pattern_lengths[m.bank, b] = m.pattern_lengths[m.bank, a]
+        else:
+            m.pattern_lengths.pop((m.bank, b), None)
+        if (m.bank, a) in m.part_links:                        # the part assigned to the pattern travels
+            m.part_links[m.bank, b] = m.part_links[m.bank, a]
+        if m.pattern == b:                                     # pasted onto the playing pattern: it is read now
+            m.tracks = m.patterns[m.bank, b]
+            run.length = m.pattern_lengths.get((m.bank, b), 16)
+            m.part_cur = m.part_links.get((m.bank, b), 1)
+            m.part = m.parts.setdefault((m.bank, m.part_cur), {t: PartData() for t in range(1, 9)})
+
+
 @handler("PART.CUR")
 def _partcur(run, ctx, fr, n, v):
     return run.model.part_cur
@@ -1787,6 +1938,70 @@ def _slflip(run, ctx, fr, n, v):
 @handler("TRK.SWING")
 def _trkswing(run, ctx, fr, n, v):
     return run.model.tracks[run.cur_track(ctx)].swing
+
+
+_REC_SRC_MASKS = ("rec1", "rec2", "rec3")        # TRAC +0x20 (AB), +0x28 (CD), +0x30 (SRC3)
+
+
+def _rec_src(td, s, src):
+    td.put("rec1", s, bool(src & 1))
+    td.put("rec2", s, bool(src & 2))
+    td.put("rec3", s, bool(src & 4))
+
+
+def _rec_del(td, s):
+    """The stock grid writer's release on one step: the three source masks, the one-shot flag (+0x38) and
+    the recorder micro-timing byte (+0x859, not modelled here: no operation of OType sets it) go.  The
+    playback trig word of the step, its micro-timing included, is NOT touched."""
+    for m in _REC_SRC_MASKS + ("m38",):
+        td.put(m, s, False)
+
+
+@handler("RT.ADD")
+def _rtadd(run, ctx, fr, n, v):
+    if not 1 <= v[1] <= 7:                      # a recorder trig always listens to something
+        run.oor(n.op, n.line, fr)
+        return
+    for t, td in run.each_track(ctx, n, fr):
+        _rec_src(td, v[0], v[1])
+
+
+@handler("RT.DEL")
+def _rtdel(run, ctx, fr, n, v):
+    for t, td in run.each_track(ctx, n, fr):
+        _rec_del(td, v[0])
+
+
+@handler("RT.CLR")
+def _rtclr(run, ctx, fr, n, v):
+    for t, td, s in run.each_step(ctx, n, fr):
+        _rec_del(td, s)
+
+
+@handler("RT.SRC")
+def _rtsrc(run, ctx, fr, n, v):
+    if not 1 <= v[1] <= 7:
+        run.oor(n.op, n.line, fr)
+        return
+    for t, td in run.each_track(ctx, n, fr):
+        _rec_src(td, v[0], v[1])
+
+
+@handler("RO.ADD")
+def _roadd(run, ctx, fr, n, v):
+    if not 1 <= v[1] <= 7:                      # as rt.add: a recorder trig always listens to something
+        run.oor(n.op, n.line, fr)
+        return
+    for t, td in run.each_track(ctx, n, fr):
+        _rec_src(td, v[0], v[1])
+        td.put("m38", v[0], True)               # TRAC +0x38: the one shot state of the recorder trig
+
+
+@handler("RO.DEL")
+def _rodel(run, ctx, fr, n, v):
+    for t, td in run.each_track(ctx, n, fr):
+        _rec_del(td, v[0])
+
 
 
 # PL -------------------------------------------------------------------------------------------
@@ -2108,6 +2323,58 @@ def _trkinit(run, ctx, fr, n, v):
             pt.lfo_wave[x] = 0
         for sc in range(1, SCENES + 1):
             pt.scenes[sc] = _all_off()
+
+
+@handler("REC.SRC")
+def _recsrc(run, ctx, fr, n, v):
+    t, src_idx, val = v[0], v[1], v[2]
+    if not (1 <= t <= 8) or not (1 <= src_idx <= 3):
+        run.oor(n.op, n.line, fr)
+        return
+    if src_idx in (1, 2) and not (0 <= val <= 4):
+        run.oor(n.op, n.line, fr)
+        return
+    if src_idx == 3 and not (0 <= val <= 10):
+        run.oor(n.op, n.line, fr)
+        return
+    off = 0 if src_idx == 1 else 1 if src_idx == 2 else 4
+    run.model.part[t].rec_setup[off] = val
+
+
+@handler("REC.LEN")
+def _reclen(run, ctx, fr, n, v):
+    t, val = v[0], v[1]
+    if not (1 <= t <= 8) or not (1 <= val <= 64):
+        run.oor(n.op, n.line, fr)
+        return
+    run.model.part[t].rec_setup[2] = 64 if val == 64 else val - 1   # the part holds RLEN 0-based, 64 = MAX
+
+
+@handler("REC.TRIG")
+def _rectrig(run, ctx, fr, n, v):
+    t, val = v[0], v[1]
+    if not (1 <= t <= 8) or not (0 <= val <= 2):
+        run.oor(n.op, n.line, fr)
+        return
+    run.model.part[t].rec_setup[3] = val            # TRAC +0x603: ONE, ONE-2, HOLD
+
+
+@handler("REC.LOOP")
+def _recloop(run, ctx, fr, n, v):
+    t, val = v[0], v[1]
+    if not (1 <= t <= 8) or not (0 <= val <= 1):
+        run.oor(n.op, n.line, fr)
+        return
+    run.model.part[t].rec_setup[5] = val            # TRAC +0x605: LOOP off / on
+
+
+@handler("REC.ARM")
+def _recarm(run, ctx, fr, n, v):
+    t, src = v[0], v[1]
+    if not (1 <= t <= 8) or not (1 <= src <= 7):
+        run.oor(n.op, n.line, fr)
+        return
+    run.model.rec_arms.append((t, src))
 
 
 @handler("TRK.SLOT")
@@ -2559,6 +2826,165 @@ def _norm(run, ctx, fr, n, v):
     run.model.normalized[path] = db
 
 
+@handler("PLAY")
+def _play(run, ctx, fr, n, v):
+    run.record_play(v[0])
+
+
+@handler("GATE")
+def _gate(run, ctx, fr, n, v):
+    run.record_gate(v[0])
+
+
+@handler("OUT")
+def _out(run, ctx, fr, n, v):
+    run.set_out(v[0], v[1])
+
+
+@handler("CV")
+def _cv(run, ctx, fr, n, v):
+    return run.read_cv(v[0], v[1])
+
+
+@handler("NX.SMP")
+def _nx_smp(run, ctx, fr, n, v):
+    run.nx_smp = v[0]
+
+
+@handler("NX.PL")
+def _nx_pl(run, ctx, fr, n, v):
+    rg = _lock_range(run, run.cur_track(ctx), v[0], n, fr)
+    if rg is not None:
+        run.nx_pl[v[0]] = clamp(v[1], rg[0], rg[1])
+
+
+@handler("SEQ.RUN")
+def _seq_run(run, ctx, fr, n, v):
+    sr = getattr(run, "seq_running", False)
+    if callable(sr):
+        return 1 if sr(getattr(run, "tick", 0)) else 0
+    return 1 if sr else 0
+
+
+@handler("SEQ.STEP")
+def _seq_step(run, ctx, fr, n, v):
+    t = v[0]
+    steps = getattr(run, "seq_steps", None)
+    tick = getattr(run, "tick", 0)
+    if callable(steps):
+        return steps(tick, t)
+    if isinstance(steps, dict):
+        return steps.get(t, 1)
+    if isinstance(steps, (list, tuple)) and 1 <= t <= len(steps):
+        return steps[t - 1]
+    return 1
+
+
+@handler("SEQ.MUTE")
+def _seq_mute(run, ctx, fr, n, v):
+    t = v[0]
+    mutes = getattr(run, "seq_mutes", None)
+    tick = getattr(run, "tick", 0)
+    if callable(mutes):
+        return 1 if mutes(tick, t) else 0
+    if isinstance(mutes, dict):
+        return 1 if mutes.get(t, 0) else 0
+    if isinstance(mutes, (list, tuple)) and 1 <= t <= len(mutes):
+        return 1 if mutes[t - 1] else 0
+    return 0
+
+
+@handler("NOTE.NUM")
+def _note_num(run, ctx, fr, n, v):
+    ev = getattr(run, "current_event", None) or {}
+    return ev.get("note.num", 0)
+
+
+@handler("NOTE.VEL")
+def _note_vel(run, ctx, fr, n, v):
+    ev = getattr(run, "current_event", None) or {}
+    return ev.get("note.vel", 0)
+
+
+@handler("NOTE.CH")
+def _note_ch(run, ctx, fr, n, v):
+    ev = getattr(run, "current_event", None) or {}
+    return ev.get("note.ch", 1)
+
+
+@handler("CC.NUM")
+def _cc_num(run, ctx, fr, n, v):
+    ev = getattr(run, "current_event", None) or {}
+    return ev.get("cc.num", 0)
+
+
+@handler("CC.VAL")
+def _cc_val(run, ctx, fr, n, v):
+    ev = getattr(run, "current_event", None) or {}
+    return ev.get("cc.val", 0)
+
+
+@handler("CC.CH")
+def _cc_ch(run, ctx, fr, n, v):
+    ev = getattr(run, "current_event", None) or {}
+    return ev.get("cc.ch", 1)
+
+
+@handler("TRIG.STEP")
+def _trig_step(run, ctx, fr, n, v):
+    ev = getattr(run, "current_event", None) or {}
+    return ev.get("trig.step", 0)
+
+
+@handler("TRIG.HIT")
+def _trig_hit(run, ctx, fr, n, v):
+    ev = getattr(run, "current_event", None) or {}
+    return ev.get("trig.hit", 0)
+
+
+@handler("TRIG.VAL")
+def _trig_val(run, ctx, fr, n, v):
+    ev = getattr(run, "current_event", None) or {}
+    return ev.get("trig.val", 0)
+
+
+@handler("SEND.NOTE")
+def _send_note(run, ctx, fr, n, v):
+    run.midi_out.append((run.tick, "note", v[0], v[1], v[2], v[3]))
+
+
+@handler("SEND.CC")
+def _send_cc(run, ctx, fr, n, v):
+    run.midi_out.append((run.tick, "cc", v[0], v[1], v[2]))
+
+
+@handler("SEND.PROG")
+def _send_prog(run, ctx, fr, n, v):
+    run.midi_out.append((run.tick, "prog", v[0], v[1]))
+
+
+@handler("SEND.NRPN")
+def _send_nrpn(run, ctx, fr, n, v):
+    ch, p, val = v[0], v[1], v[2]
+    for num, x in ((99, p >> 7), (98, p & 0x7F), (6, val >> 7), (38, val & 0x7F)):
+        run.midi_out.append((run.tick, "cc", ch, num, x))
+
+
+@handler("MIDI.CC")
+def _midi_cc(run, ctx, fr, n, v):
+    return run.model.midi_cc.get((v[0], v[1]), 0)
+
+
+@handler("MIDI.NOTE")
+def _midi_note(run, ctx, fr, n, v):
+    return run.model.midi_note.get(v[0], 0)
+
+
+@handler("MIDI.VEL")
+def _midi_vel(run, ctx, fr, n, v):
+    return run.model.midi_vel.get(v[0], 0)
+
+
 def msg_text(items):
     """The text of a msg: its items (strings, numbers) in decimal, one space between them; at most MAX_MSG characters
     (the checker refuses a worst case above; an argument that carries a long string is cut here, as the C VM's buffer does)."""
@@ -2715,8 +3141,81 @@ def _result(run, name, fn, model, before, seed, seed_src, pattern, track, bank, 
     r.not_on_unit = sorted(run.used_unit)
     r.warnings = run.warnings
     r.globals = {k.lower(): v for k, v in run.globals.items()}
+    r.fn_vars = {}
+    if getattr(run, "saved_vars", None):
+        for fn_k, v in run.saved_vars.items():
+            r.fn_vars[str(fn_k).upper()] = dict(v)
+    for fn, v in getattr(run, "fn_vars", {}).items():
+        fn_name = getattr(fn, "name", str(fn))
+        fn_key = fn_name.upper()
+        d = dict(v)
+        for k, val in list(d.items()):
+            if isinstance(k, str):
+                d[k.upper()] = val
+        if fn_key not in r.fn_vars:
+            r.fn_vars[fn_key] = {}
+        r.fn_vars[fn_key].update(d)
     r.state = state_json(run)
+    r.plays = list(run.plays)
+    r.midi_out = list(run.midi_out)
+    r.outs = list(getattr(run, "outs", []))
+    r.gates = list(getattr(run, "gates", []))
     return r
+
+
+def simulate_module(prog, name, total_ticks, seed=None, state=None, params=None,
+                    model=None, track=1, pattern=1, bank=None,
+                    seq_running=False, seq_steps=None, seq_mutes=None,
+                    run_class=None):
+    """Simulate a module function over `total_ticks` ticks (0 .. total_ticks - 1).
+    Invokes the module at tick 0 and every `clock_ticks` thereafter (tick < total_ticks).
+    Preserves state across invocations.
+    Returns (last_result, all_plays) where all_plays is a list of (tick, track_number)."""
+    fn = prog.fmap.get(name.upper())
+    if fn is None:
+        raise SimError("unknown function %r" % name)
+    clock_ticks = None
+    if getattr(fn, "clock", None) is not None:
+        clock_ticks = fn.clock[0] if isinstance(fn.clock, tuple) else int(fn.clock)
+    elif hasattr(fn, "clock_ticks"):
+        clock_ticks = int(fn.clock_ticks)
+    if clock_ticks is None or clock_ticks < 1:
+        raise SimError("function %r is not a module or has invalid clock" % name)
+
+    all_plays = []
+    curr_state = state
+    curr_fn_vars = {}
+    last_res = None
+    curr_model = model
+
+    for t in range(0, total_ticks, clock_ticks):
+        sr = seq_running(t) if callable(seq_running) else seq_running
+        sst = seq_steps(t) if callable(seq_steps) else seq_steps
+        sm = seq_mutes(t) if callable(seq_mutes) else seq_mutes
+
+        def _make_run(*args, **kwargs):
+            cls = run_class or Run
+            r = cls(*args, **kwargs)
+            r.tick = t
+            r.current_event = {"type": "CLOCK"}
+            r.seq_running = sr
+            r.seq_steps = sst
+            r.seq_mutes = sm
+            if curr_fn_vars:
+                r.saved_vars = copy.deepcopy(curr_fn_vars)
+            return r
+
+        last_res = simulate(prog, name, seed=seed, model=curr_model, track=track,
+                            pattern=pattern, bank=bank, state=curr_state,
+                            params=params, run_class=_make_run)
+        all_plays.extend(last_res.plays)
+        curr_state = last_res.state
+        curr_fn_vars = getattr(last_res, "fn_vars", {})
+        curr_model = last_res.model
+        if seed is not None:
+            seed = (seed + 1) & 0xFFFF
+
+    return last_res, all_plays
 
 
 def state_json(run):

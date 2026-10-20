@@ -419,6 +419,14 @@ CC_NOINLINE static void cc_load_file(otc_comp_t *c, uint32_t file)
                 cur = cc_load_def(c, file, &li, no, ls.pos, no + 1u);
                 if (!cur)
                     return;
+            } else if (cc_ci_eq(w, wn, "VAR")) {          /* a var belongs inside a function (and inside its in block) */
+                cc_report(c, file, &li, no, cur);
+                mb_begin(c);
+                mb_lit(c, "var at file level is not supported yet");
+                if (cur)
+                    cc_func_err(c, cur, no, mb_end(c), 0);
+                else
+                    cc_file_err(c, file, no, mb_end(c));
             } else {
                 cc_report(c, file, &li, no, cur);
                 mb_begin(c);

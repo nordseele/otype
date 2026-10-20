@@ -104,7 +104,7 @@ casing on the card. `match` patterns are case-insensitive.
 
 ### 2.4 Reserved words
 
-Language: `otype def const menu page on param confirm if elif else l each prob
+Language: `otype def const menu page on param confirm in var if elif else l each prob
 every skip seed del break stop ret off all cur deep flip o drunk`, the variables, the
 operators of §5, plus every API name (registry, §8). A user name that
 reuses one is an error.
@@ -135,8 +135,16 @@ body        := { declaration } statement { statement }
 |---|---|
 | `menu "LEVEL" >> … >> "ACTION"` | place in the menu: at least one level + the action. Several `menu` allowed. **Without `menu` the function does not appear**: it is a brick. Widths checked (today 6 / 10 characters). More than one level: warning, as menus have no submenus yet. |
 | `page "LABEL"` | lists the function on a **page of encoders**, when the firmware has one. LABEL = 1..8 printable ASCII characters (0x20..0x7e), kept as written (the page shows it in capitals); empty or longer = error. **At most one** per function (`duplicate page declaration`). A page function **takes no argument** (`a page function takes no arguments`: the page calls it with none), has **at most 6 `param`s** — they are the encoders A..F in declaration order (`page function has more than 6 params`) — and **may not use the card, the sample slots or the pool**, directly or through what it calls: the namespaces FILE, SLOT and POOL (`dir ext match file.* slot.* slots.* pool.*`) are refused with `op NAME not allowed in a page function`, NAME being the **first** such op: the function's own ops in source order (lowest line; the first in the line on a tie), else the first callee (in order of first call) that has one, the error then standing on that call's line; callers of the refused function get `needs …`. (The pattern reads `has.trig pat.len pl.get trk.cur …` are allowed: the page works on a snapshot of the pattern.) A function may have both `menu` and `page`. `confirm` is accepted and ignored by the page. `page` is a reserved word. |
+| `var name init` | declares a persistent variable (0..15 per function), initialized to `init` (constant integer) on load. Accessible across invocations of the live script or function. Can also be declared at the top of an `in` block. |
+| `in clock N:` | declares a periodic block executed every N clock ticks (N ≥ 1). Organizes a live script without `module` or isolated `clock`. |
+| `launch N` | **live script only** (`launch is only allowed in a live script`): the launch quantum of the first wake, in clock ticks, independent of `in clock` (96 ticks = a quarter note, so `launch 384` waits for the next bar in 4/4). The first wake of the script falls on the next multiple of N **from the grid origin**: the transport's start while playing, else the tick the first live script of the run was started at (that origin is forgotten when every live script is stopped, and at PLAY). A script that fixes the grid itself and declares `launch` starts on the grid's own next multiple (`ceil(now / N) * N`), so its first wake waits for the next bar. At most one per function. |
+| `in note [ch]:` | declares a block executed on MIDI note-on events, optionally filtered by MIDI channel (1..16). Within this block, `note.num`, `note.vel`, and `note.ch` are available. |
+| `in cc ch n:` | declares a block executed on MIDI CC events matching channel `ch` (1..16) and CC number `n` (0..127). Within this block, `cc.num`, `cc.val`, and `cc.ch` are available. |
+| `in trig t:` | declares a block executed on the trigs of audio track `t` (1..8) that really play: trig placed, condition met, track not muted. Within this block, `trig.step` (1..64) and `trig.hit` (always 1) are available. The wake is the step's tick, micro-timing excluded. |
+| `in trig t all:` | same, but wakes on **every trig placed** on track `t` as the sequencer passes over it, even when its condition fails or the track is muted (`trig.hit` = 1 played, 0 not played). |
+| `in gate NAME n:` | wakes when the running live script named `NAME` (1..8 characters) emits `gate n` (n = 1..4), **at the same tick and in the same pass**: its `play` is dated like the master's. Wakes once per tick and per script (a feedback link is deferred by one tick); a cascade runs at most four scripts deep. |
 | `on host [args]` | another trigger (`on trig`, `on loop 4`, `on load`). In v1: accepted with a **warning** "host not available yet", no effect. Unknown host: warning too. |
-| `param name default min max` | a setting editable on the unit, read like a read-only variable. Constants, min ≤ default ≤ max, ≤ 8 per function. A **brick** (neither `menu` nor `page`) cannot have one: the caller passes the value. |
+| `param name default min max [source]` | a setting editable on the unit or bound to a MIDI source (e.g. `cc ch n`, `note ch`, `vel ch`), read like a read-only variable. Constants, min ≤ default ≤ max, ≤ 8 per function. |
 | `param name bool d` · `param name option d "A" "B" …` · `param name folder "PATH"` | **typed parameters**. `bool`: default `0`/`1` (or `yes`/`no`), shown YES/NO, read as 0 or 1. `option`: 2..16 labels of ≤ 12 characters, `d` the index of the default (0-based), shown as its label, read as the index. `folder`: a path of ≤ 64 characters under the set (`"AUDIO"`), picked on the unit with a folder browser; it is not a number: only `dir name [deep]` reads it (`folder param NAME cannot be used in arithmetic`). At most 4 `folder` per function; a page function may not declare one. A function whose params are all plain numbers compiles to the same bytes as before (§14.1). |
 | `confirm ["TEXT"]` | ask YES/NO before running. Implied when the function (or a brick it calls) contains a destructive operation. TEXT (the first non-empty one; ≤ 116 characters on a 128-character line) is the question the confirmation box shows (kept in the table, §14.1); without it the box shows `NAME?`. |
 | `input sample` | declares that the function acts on the host audio sample context. **Mandatory** for any function using `src.save` (or calling a function that uses it). Bit 0x10 in entry flags (§14.1). Filtered by the host menu. |
@@ -163,7 +171,7 @@ lim add x 10 0 127      = x + 10 clamped to 0..127
 
 | | arity | note |
 |---|---|---|
-| `add sub mul div mod` (aliases `+ - * /`) | 2 | `div x 0` = 0; `mod x 0` = 0; `mod -1 4` = 3 (remainder always ≥ 0) |
+| `add sub mul div mod` (aliases `+ - * / %`) | 2 | `div x 0` = 0; `mod x 0` = 0; `mod -1 4` = 3 (remainder always ≥ 0) |
 | `min max` | 2 | |
 | `abs neg not` | 1 | |
 | `lim x lo hi` · `wrap x lo hi` | 3 | clamp / wrap into lo..hi |
@@ -179,6 +187,22 @@ lim add x 10 0 127      = x + 10 clamped to 0..127
 | `on` `off` | 0 | 1 and 0 |
 | `er k n s` · `er.r k n r s` | 3 · 4 | **rhythm**: 1 if step s plays in a Euclidean rhythm of k hits over n steps (rotated by r), else 0; s wraps modulo n (the unit's euclidean model) |
 | `dr.v c s` | 2 | **rhythm**: velocity 0..127 of curve c at step s — our own tables, not Teletype's: 16 values per curve, step s reads entry (s − 1) mod 16 (repeats every 16 steps, s ≤ 0 wraps the same way); c = 0 flat 100 · 1 accents on the beats (127 / 80) · 2 accents off the beats (110 on 3 7 11 15 / 60) · 3 ramp up 16..121 · 4 ramp down 127..22 · 5 eighths 120 / sixteenths 70 · 6 tresillo 3+3+2 (127 on 1 4 7 9 12 15 / 64) · 7 swell 32 → 127 (step 9) → 44; another c reads curve 0 (no out-of-range report). Data: `sim.DRV_TABLE` = `vm.c` `DRV_TAB` |
+
+#### Operator aliases (Word ↔ Symbol)
+
+| Word | Symbol | Arity | Description |
+|---|---|---|---|
+| `add` | `+` | 2 | addition |
+| `sub` | `-` | 2 | subtraction |
+| `mul` | `*` | 2 | multiplication |
+| `div` | `/` | 2 | division (0 if y = 0) |
+| `mod` | `%` | 2 | remainder (always ≥ 0, 0 if y = 0) |
+| `eq` | `==` | 2 | 1 if x == y, else 0 |
+| `ne` | `!=` | 2 | 1 if x != y, else 0 |
+| `lt` | `<` | 2 | 1 if x < y, else 0 |
+| `gt` | `>` | 2 | 1 if x > y, else 0 |
+| `le` | `<=` | 2 | 1 if x <= y, else 0 |
+| `ge` | `>=` | 2 | 1 if x >= y, else 0 |
 
 ### 5.2.1 State operators
 
@@ -381,6 +405,93 @@ line and, last, `end box: "…"`.
   `pat.cur` / `bank.cur` keep answering the pattern now playing until the switch; the simulator answers the target at once.
   Show the variable you passed to `pat.go`.
 
+### 6.4 bis Script gates and outputs (`gate`, `out`, `cv`)
+
+A live script can be wired to another by name, like a small modular patch:
+
+```
+def acid
+  in clock 24:
+    prob 50: gate 1
+    out 1 rnd 128
+
+def follow
+  in gate acid 1:
+    x cv acid 1
+    play 2
+```
+
+- `gate n` (n = 1..4): emits a gate on output `n`, dated at the **current block's tick**. The live scripts that declare
+  `in gate NAME n:` (NAME = this function's name) run just after, in the same pass, with the same tick.
+- `out n v` (n = 1..4): publishes the integer `v` on output `n`, held until it changes (0 at launch). Every running script
+  has four outputs.
+- `cv NAME n`: reads output `n` of the running script named `NAME`; **0 if that script is not running** or `n` is out of
+  range. The name is written bare (`cv acid 1`, not `cv "acid" 1`), resolved **by name**, not by launch order; a name
+  longer than 8 characters or that is not a valid function name is an error ("cv: …").
+- The cascade order is the patch's: a master's followers run in the same pass, in slot order; a script runs at most once
+  per tick in a cascade, so a feedback link (A follows B, B follows A) is broken by **one tick of delay** on the return
+  link; the depth is capped at **4 scripts** (the fifth wake is counted as skipped). A gate ring that is full drops the
+  event and counts it; nothing blocks.
+- `gate`, `out` and `cv` are only allowed in a live script (`op NAME only allowed in a live script`), and are reserved names.
+- The same values are readable from another runtime through the public `otype_read_out(name8, out)`, which `cv` uses.
+
+### 6.5 Direct MIDI output (`send.note`, `send.cc`, `send.prog`, `send.nrpn`) and MIDI input (`midi.*`)
+
+- `send.note ch n vel dur`: sends a MIDI Note-On on channel `ch` (1..16), note `n` (0..127), velocity `vel` (0..127), and automatically schedules a Note-Off after `dur` ticks (dur ≥ 1 in units of `in clock`, 96 per quarter note). If a note is already playing on the same channel and note number, its Note-Off is sent immediately before retriggering.
+- `send.cc ch n v`: sends a MIDI Control Change on channel `ch` (1..16), controller `n` (0..127), value `v` (0..127).
+- `send.prog ch p`: sends a MIDI Program Change on channel `ch` (1..16), program `p` (0..127).
+- `send.nrpn ch p v`: sends an NRPN as the four Control Changes 99, 98, 6, 38 on channel `ch` (1..16): parameter `p` (0..16383) and value `v` (0..16383), MSB first. **All four go out or none does**: the free space of the transmit buffer is tested for the twelve bytes before the first one is written, so a script never sends half an NRPN.
+
+Permitted in menu scripts and live scripts. All messages test for free transmit buffer space before sending to avoid blocking.
+
+**The MIDI input tables** — what the last message received on each channel left behind (since power on, 0 before):
+- `midi.cc ch n`: the last value (0..127) of controller `n` (0..127) received on channel `ch` (1..16);
+- `midi.note ch`: the last note number (0..127) received on channel `ch`;
+- `midi.vel ch`: the velocity of that last note.
+
+A script can therefore mirror an external controller: `midi.cc 1 74`, or play the track the incoming note names, `play midi.note 1 - 59`.
+
+### 6.6 Recorder trigs and track recorder settings (`rt.*`, `rec.*`)
+
+- **Recorder trigs** (on the context tracks, like `tr.*`; a recorder trig and an audio trig may share a step):
+  - `rt.add s [src]`: add a recorder trig on step `s` (1..64) with source mask `src` (1 AB, 2 CD, 4 internal, additive; default = 7 for all three, the stock default). `src` must be 1..7: 0 or 8 is counted out of range and nothing is written.
+  - `rt.del s`: remove the recorder trig on step `s`: its three source masks, its one-shot flag and its micro-timing. The audio trig of the step, its word and its locks are not touched.
+  - `rt.clr`: remove every recorder trig of the context steps (as `rt.del`).
+  - `rt.src s v`: set the source mask of step `s` to `v` (1..7).
+- **Track recorder settings** (RECORDING SETUP, manual §9.1.2, stored in the part):
+  - `rec.src t n v`: set recorder input source `n` (1 INAB, 2 INCD, 3 SRC3) to stock value `v` on track `t` (1..8). For INAB/INCD: 0 (`-`), 1 (`A B` / `C D`), 2 (`A` / `C`), 3 (`B` / `D`), 4 (`A+B` / `C+D`), values above 4 clamp to `A+B`/`C+D`. For SRC3: 0 (`-`), 1..8 (`T1`..`T8`), 9 (`MAIN`), 10 (`CUE`), values above 10 clamp to `CUE`.
+  - `rec.len t v`: set recorder length RLEN to `v` steps on track `t` (1..8), or to MAX with `v` = 64. It is the length the recorder writes on its next arm: `rec.len 1 4` records 4 steps. (The part stores it 0-based, 0..63 = 1..64 steps and 64 = MAX.)
+
+- **One shot recorder trigs** (manual 12.4.5): `ro.add s [src]` adds a recorder trig that records **once** (the
+  sources and the one-shot state at `TRAC +0x38`), `ro.del s` removes a recorder trig of either kind (as `rt.del`).
+  The one-shot state is per track: once one of its one-shot trigs has fired, no other one-shot trig of that track
+  fires — sample or recorder — until they are re-armed by `os.arm`, [STOP]+[STOP] or a project change.
+- **`rec.trig t v`**: TRIG mode of the track recorder: 0 ONE, 1 ONE-2, 2 HOLD.
+- **`rec.loop t v`**: LOOP, 0 off / 1 on: whether the captured sample loops when played back.
+- **`rec.arm t [src]`**: starts a recording on track `t` right now, from the sources `src` (1 AB, 2 CD, 4 SRC3,
+  1..7, default 7), exactly as the panel's [TRACK]+[AUDIO REC] does — QREC (RECORDING SETUP 2) still delays the start
+  to its quantisation point when it is not OFF.
+
+`rt.micro` is not part of v1.
+
+### 6.7 Copying a pattern (`pat.copy a b`)
+
+`pat.copy a b` copies **pattern a** (1..16) onto **pattern b** (1..16) of the **current bank**, through the
+same stock writer as the [FUNCTION]+[STOP] paste: the whole pattern record of 0x8ed8 bytes — trigs of the eight
+audio and eight MIDI tracks, every lock, the pattern length and the **part assigned** to the pattern — lands in
+the bank **and** in the pattern's SRAM copy, the stock's dirty flags are set and the playing pattern's part and
+tempo are re-applied as the gesture does. The **pattern clipboard is not touched**: a copy made with
+[FUNCTION]+[REC] survives, and neither is any part's data or the sample pool (only the *assignment* byte
+travels). The stock's undo snapshot is taken first (`UNDO PATTERN` works afterwards, as after the gesture), and
+the operator is **destructive**: the box asks before it runs.
+
+`a = b` is a **refused argument**: nothing is written and the run stops (`pat.copy: source and destination are
+the same pattern`). A number outside 1..16 is out of range (`pat.copy` in the run's list, the run goes on).
+The source is read in the bank, so the destination never overlaps the source (`a = b` is the only overlap).
+
+**Menu scripts only**: `pat.copy` is refused in a live script (`op pat.copy not allowed in a live script`,
+directly or through a call) — a live wake cannot ask the confirmation.
+
 ### 6.1 Variables
 
 | | scope |
@@ -574,6 +685,7 @@ is counted apart (`hats: 5 skipped, no trig`).
 | `l` with a variable bound, call cycle (`a > b > a`), depth > 8 | error (`loop a>b>a`) |
 | maximum cost > the host's budget | error (`too long: 5200/4096`) |
 | operation not allowed by one of the declared hosts | error |
+| a menu-only operation (`pat.copy`) in a live script, or in what a live script calls | error (`op pat.copy not allowed in a live script`) |
 | `param` in a brick, orphan `else`, empty block | error |
 | function calling a refused function | refused too (`needs lock_samples`) |
 | `on` not available yet or unknown, `deprecated` operation, submenu | **warning**: the function loads |
@@ -840,10 +952,10 @@ sorted without case** like file lists, §2.1), the functions in the order of the
 |---|---|---|
 | 0 | 16 | name, upper case ASCII, NUL padded (≤ 16 characters) |
 | 16 | 2 | `menu_off`: pool offset of the menu list (0 = no `menu`: a brick, or a page-only function) |
-| 18 | 2 | host mask: bit 0 MENU, **bit 7 PAGE** (`page "LABEL"`); 1 TRIG, 2 LOOP, 3 PAT, 4 FILL, 5 LOAD, 6 MIDI reserved. A VM that ignores bit 7 reads the table as before |
+| 18 | 2 | host mask: bit 0 MENU, **bit 6 LIVE** (a live script: the function's own name is its label), **bit 7 PAGE** (`page "LABEL"`), **bit 8 GATE** (`in gate`), **bit 9 CC** (`in cc`); 1 TRIG, 2 LOOP, 3 PAT, 4 FILL, 5 LOAD reserved |
 | 20 | 2 | families mask (union over the function **and what it calls**): 0x01 LANG, 0x02 CTX, 0x04 EDIT, 0x08 IO_R, 0x10 IO_W, 0x20 UI, 0x40 STATE; 0x80 PLAY, 0x100 ASK reserved |
 | 22 | 1 | touches mask (same union): 1 TRAC, 2 PART, 4 SLOTS |
-| 23 | 1 | flags: bit 0 destructive (§9: confirm asked), bit 1 `confirm` declared, **bit 2 confirm text** (`confirm "TEXT"`: its pool offset ends the aux data), **bit 3 typed params** (a type block follows, see the aux data), **bit 4 input sample** (`input sample`: bit 0x10, `OTC_FL_INPUT_SAMPLE`). A VM that ignores bits 2-4 reads the table as before (a `bool` / `option` reads as a number in its range) |
+| 23 | 1 | flags: bit 0 destructive (§9: confirm asked), bit 1 `confirm` declared, **bit 2 confirm text** (`confirm "TEXT"`: its pool offset ends the aux data), **bit 3 typed params** (a type block follows, see the aux data), **bit 4 input sample** (`input sample`: bit 0x10, `OTC_FL_INPUT_SAMPLE`), **bits 5-6** the `var` values and the param sources (`OTC_FL_VARS`, `OTC_FL_PARAM_SOURCES`), **bit 7 `launch N`** (2 bytes end the aux data, `OTC_FL_LAUNCH`). A VM that ignores bits 2-7 reads the table as before (a `bool` / `option` reads as a number in its range) |
 | 24 | 4 | static maximum cost (the checker's bound, §9.1) |
 | 28 | 4 | namespace mask (union as above): bit *n* = a namespace number *n* of the registry is used (`no module …` check) |
 | 32 | 1 | `nargs` (0..4) |
@@ -865,7 +977,8 @@ sorted without case** like file lists, §2.1), the functions in the order of the
 **Aux data of a function** (at `aux_off`, in this order): `nparams` × 8 bytes
 `{name_off u16, default i16, min i16, max i16}` (name = pool string); `nargs` × 2 bytes
 `{name_off u16}`; `nctr` × 4 bytes `{line u16, modifier index u8, 0}`; **only when the PAGE bit of the host mask is set**
-2 bytes `{label_off u16}`, the pool offset of the page label (a type 1 string of 1..8 printable characters), so
+2 bytes `{label_off u16}`, the pool offset of the page label (a type 1 string of 1..8 printable characters);
+**only when the LIVE bit of the host mask is set** 4 bytes `{name_off u16, clock_ticks u16}` (the function's own name, and the period of its first `in clock` block, 0 when it has none); so
 it sits at `aux_off + nparams*8 + nargs*2 + nctr*4` (a PAGE function has `nargs` = 0 and `nparams` ≤ 6; a loader rejects a
 table where it does not, or where the label is not a 1..8 printable-character string); then, **only when flag bit 2 is set**:
 2 bytes `{confirm_off u16}`, the pool offset of the text of `confirm "TEXT"` (a type 1 string of 1..127 printable characters,
@@ -876,7 +989,9 @@ printable-character string. Then, **only when flag bit 3 is set** (typed paramet
 parameter k at bits 2k..2k+1 (0 int, 1 bool, 2 option, 3 folder); for each `folder` parameter in order, `path_off u16` (pool
 string of its default path); for each `option` parameter in order, `count u16` then `count` × `label_off u16` (pool
 strings). In the 8-byte parameter record a `bool` has min 0, max 1; an `option` min 0, max count − 1; a `folder` default
-= `path_off`, min = max = 0. The counter an
+= `path_off`, min = max = 0. Then **only when flag bit 7 is set** (`launch N` of a live script): 2 bytes
+`{launch_ticks u16}` (1..32767) that **end the aux data**, after the `var` values and the param sources; a function without
+`launch` has neither the bit nor the 2 bytes, so its bytes are those of before. The counter an
 `every`/`skip` instruction names is an index into this list; `(line, index)` is the key the state
 file of `run --state` uses (`"12"` = modifier 0 of line 12, `"12.1"` = modifier 1).
 
@@ -946,6 +1061,8 @@ their operation** (`cost` field of `ops.py`), `set` adds 1, every other instruct
 | 0x43 | `prob` | u16 | −1 | pop p (clamped 0..100); **one** draw of the `prob` stream; jump forward unless `below(100) < p` |
 | 0x44 | `every` | u8 k, u16 | −1 | pop n; step counter k as §7; jump forward unless it fires |
 | 0x45 | `skip` | u8 k, u16 | −1 | same counter; jump forward if it fires |
+| 0x46 | `jnev` | u8 kind, u8 ch, u8 num, u16 | 0 | jump forward unless current event matches kind (1 clock, 2 note, 3 cc, 4 trig), channel ch (0/255=any), and cc number num (255=any). For kind 4, ch is the track (1..8) and num the block's genre: 0 = a trig that plays (`trig.hit` 1), 1 = every trig placed; 2..255 are reserved |
+| 0x47 | `jngt` | u16 name pool offset, u8 out, u16 | 0 | jump forward unless the current event is a gate (event type 5) whose source script name is the pool string (` `) and whose output is `out` (the guard of `in gate NAME n:`) |
 | 0x50 | `lbeg` | u16 end | −2 | `l a b`: pops `b a`; pushes a control frame; first scope; i = a. The body is the next instruction; `end` is the address after the matching `lnext`. The body always runs at least once (a → b upwards or downwards, inclusive) |
 | 0x51 | `lnext` | u16 body | 0 | end of an iteration: leave its scope; if the counter reached b, pop the frame and fall through, else step it (i), open the scope, **jump back to `body`** |
 | 0x52 | `ebeg` | u16 end | 0 | `each`: the steps of the top scope (ascending); none: jump to `end`. Else frame, scope narrowed to the first step (`i`, `step.cur`) |

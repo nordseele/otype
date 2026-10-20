@@ -85,6 +85,12 @@ enum {
     OTC_H_SL_DEL,   /* sl.del (3, 14) */
     OTC_H_SL_FLIP,   /* sl.flip (3, 15) */
     OTC_H_TRK_SWING,   /* trk.swing (3, 16) */
+    OTC_H_RT_ADD,   /* rt.add (3, 17) */
+    OTC_H_RT_DEL,   /* rt.del (3, 18) */
+    OTC_H_RT_CLR,   /* rt.clr (3, 19) */
+    OTC_H_RT_SRC,   /* rt.src (3, 20) */
+    OTC_H_RO_ADD,   /* ro.add (3, 21) */
+    OTC_H_RO_DEL,   /* ro.del (3, 22) */
     OTC_H_TL_ADD,   /* tl.add (4, 1) */
     OTC_H_TL_FILL,   /* tl.fill (4, 2) */
     OTC_H_TL_DEL,   /* tl.del (4, 3) */
@@ -133,6 +139,12 @@ enum {
     OTC_H_SCN_SET,   /* scn.set (9, 29) */
     OTC_H_SCN_DEL,   /* scn.del (9, 30) */
     OTC_H_SCN_COPY,   /* scn.copy (9, 31) */
+    OTC_H_REC_SRC,   /* rec.src (9, 32) */
+    OTC_H_REC_LEN,   /* rec.len (9, 33) */
+    OTC_H_REC_TRIG,   /* rec.trig (9, 34) */
+    OTC_H_REC_LOOP,   /* rec.loop (9, 35) */
+    OTC_H_REC_ARM,   /* rec.arm (9, 36) */
+    OTC_H_PAT_COPY,   /* pat.copy (9, 37) */
     OTC_H_PB,   /* pb (10, 1) */
     OTC_H_LFO,   /* lfo (10, 2) */
     OTC_H_AMP,   /* amp (10, 3) */
@@ -184,6 +196,31 @@ enum {
     OTC_H_NORM,   /* norm (17, 7) */
     OTC_H_FLEX_FIRSTFREE,   /* flex.firstfree (17, 8) */
     OTC_H_FLEX_DEL,   /* flex.del (17, 9) */
+    OTC_H_PLAY,   /* play (18, 1) */
+    OTC_H_SEQ_RUN,   /* seq.run (18, 2) */
+    OTC_H_SEQ_STEP,   /* seq.step (18, 3) */
+    OTC_H_SEQ_MUTE,   /* seq.mute (18, 4) */
+    OTC_H_NX_SMP,   /* nx.smp (18, 5) */
+    OTC_H_NX_PL,   /* nx.pl (18, 6) */
+    OTC_H_NOTE_NUM,   /* note.num (18, 16) */
+    OTC_H_NOTE_VEL,   /* note.vel (18, 17) */
+    OTC_H_NOTE_CH,   /* note.ch (18, 18) */
+    OTC_H_CC_NUM,   /* cc.num (18, 19) */
+    OTC_H_CC_VAL,   /* cc.val (18, 20) */
+    OTC_H_CC_CH,   /* cc.ch (18, 21) */
+    OTC_H_MIDI_CC,   /* midi.cc (18, 22) */
+    OTC_H_MIDI_NOTE,   /* midi.note (18, 23) */
+    OTC_H_MIDI_VEL,   /* midi.vel (18, 24) */
+    OTC_H_TRIG_STEP,   /* trig.step (18, 25) */
+    OTC_H_TRIG_HIT,   /* trig.hit (18, 26) */
+    OTC_H_TRIG_VAL,   /* trig.val (18, 27) */
+    OTC_H_SEND_NOTE,   /* send.note (18, 32) */
+    OTC_H_SEND_CC,   /* send.cc (18, 33) */
+    OTC_H_SEND_PROG,   /* send.prog (18, 34) */
+    OTC_H_SEND_NRPN,   /* send.nrpn (18, 35) */
+    OTC_H_GATE,   /* gate (18, 36) */
+    OTC_H_OUT,   /* out (18, 37) */
+    OTC_H_CV,   /* cv (18, 38) */
     OTC_H_COUNT
 };
 
@@ -206,7 +243,7 @@ typedef struct {
     int16_t lo[4], hi[4];       /* bounds of OTC_AK_RANGE / OTC_AK_COND / OTC_AK_PCT */
 } otc_op_t;
 
-#define OTC_NOPS 177
+#define OTC_NOPS 214
 #define OTC_MSG_MAX 29            /* tools/otype.py MAX_MSG: the most characters of a msg text */
 #define OTC_MSG_ITEMS 8          /* tools/otype.py MAX_MSG_ITEMS */
 #if defined(OTC_MSG_BUF) && OTC_MSG_MAX >= OTC_MSG_BUF
@@ -293,6 +330,12 @@ static const otc_op_t otc_ops[OTC_NOPS] = {
     {3, 14, 1, OTC_OF_SUPPORTED, OTC_H_SL_DEL, {2, 0, 0, 0}, 4, 0, {1, 0, 0, 0}, {64, 0, 0, 0}},   /* sl.del */
     {3, 15, 1, OTC_OF_SUPPORTED, OTC_H_SL_FLIP, {2, 0, 0, 0}, 4, 0, {1, 0, 0, 0}, {64, 0, 0, 0}},   /* sl.flip */
     {3, 16, 0, OTC_OF_RET | OTC_OF_SUPPORTED | OTC_OF_SETTABLE, OTC_H_TRK_SWING, {0, 0, 0, 0}, 2, 0, {0, 0, 0, 0}, {0, 0, 0, 0}},   /* trk.swing */
+    {3, 17, 2, OTC_OF_SUPPORTED, OTC_H_RT_ADD, {2, 0, 0, 0}, 4, 0, {1, 0, 0, 0}, {64, 0, 0, 0}},   /* rt.add */
+    {3, 18, 1, OTC_OF_SUPPORTED, OTC_H_RT_DEL, {2, 0, 0, 0}, 4, 0, {1, 0, 0, 0}, {64, 0, 0, 0}},   /* rt.del */
+    {3, 19, 0, OTC_OF_SUPPORTED, OTC_H_RT_CLR, {0, 0, 0, 0}, 128, 0, {0, 0, 0, 0}, {0, 0, 0, 0}},   /* rt.clr */
+    {3, 20, 2, OTC_OF_SUPPORTED, OTC_H_RT_SRC, {2, 0, 0, 0}, 4, 0, {1, 0, 0, 0}, {64, 0, 0, 0}},   /* rt.src */
+    {3, 21, 2, OTC_OF_SUPPORTED, OTC_H_RO_ADD, {2, 0, 0, 0}, 4, 0, {1, 0, 0, 0}, {64, 0, 0, 0}},   /* ro.add */
+    {3, 22, 1, OTC_OF_SUPPORTED, OTC_H_RO_DEL, {2, 0, 0, 0}, 4, 0, {1, 0, 0, 0}, {64, 0, 0, 0}},   /* ro.del */
     {4, 1, 1, OTC_OF_SUPPORTED, OTC_H_TL_ADD, {2, 0, 0, 0}, 4, 0, {1, 0, 0, 0}, {64, 0, 0, 0}},   /* tl.add */
     {4, 2, 1, OTC_OF_SUPPORTED, OTC_H_TL_FILL, {1, 0, 0, 0}, 128, 0, {0, 0, 0, 0}, {100, 0, 0, 0}},   /* tl.fill */
     {4, 3, 1, OTC_OF_SUPPORTED, OTC_H_TL_DEL, {2, 0, 0, 0}, 4, 0, {1, 0, 0, 0}, {64, 0, 0, 0}},   /* tl.del */
@@ -341,6 +384,12 @@ static const otc_op_t otc_ops[OTC_NOPS] = {
     {9, 29, 3, OTC_OF_SUPPORTED, OTC_H_SCN_SET, {0, 2, 0, 0}, 4, 0, {0, 0, 0, 0}, {0, 29, 0, 0}},   /* scn.set */
     {9, 30, 2, OTC_OF_SUPPORTED, OTC_H_SCN_DEL, {0, 2, 0, 0}, 4, 0, {0, 0, 0, 0}, {0, 29, 0, 0}},   /* scn.del */
     {9, 31, 2, OTC_OF_SUPPORTED, OTC_H_SCN_COPY, {0, 0, 0, 0}, 32, 0, {0, 0, 0, 0}, {0, 0, 0, 0}},   /* scn.copy */
+    {9, 32, 3, OTC_OF_SUPPORTED, OTC_H_REC_SRC, {2, 0, 0, 0}, 4, 0, {1, 0, 0, 0}, {8, 0, 0, 0}},   /* rec.src */
+    {9, 33, 2, OTC_OF_SUPPORTED, OTC_H_REC_LEN, {2, 0, 0, 0}, 4, 0, {1, 0, 0, 0}, {8, 0, 0, 0}},   /* rec.len */
+    {9, 34, 2, OTC_OF_SUPPORTED, OTC_H_REC_TRIG, {2, 0, 0, 0}, 4, 0, {1, 0, 0, 0}, {8, 0, 0, 0}},   /* rec.trig */
+    {9, 35, 2, OTC_OF_SUPPORTED, OTC_H_REC_LOOP, {2, 0, 0, 0}, 4, 0, {1, 0, 0, 0}, {8, 0, 0, 0}},   /* rec.loop */
+    {9, 36, 2, OTC_OF_SUPPORTED, OTC_H_REC_ARM, {2, 0, 0, 0}, 4, 0, {1, 0, 0, 0}, {8, 0, 0, 0}},   /* rec.arm */
+    {9, 37, 2, OTC_OF_SUPPORTED, OTC_H_PAT_COPY, {0, 0, 0, 0}, 128, 0, {0, 0, 0, 0}, {0, 0, 0, 0}},   /* pat.copy */
     {10, 1, 1, OTC_OF_RET | OTC_OF_SUPPORTED, OTC_H_PB, {0, 0, 0, 0}, 1, 0, {0, 0, 0, 0}, {0, 0, 0, 0}},   /* pb */
     {10, 2, 1, OTC_OF_RET | OTC_OF_SUPPORTED, OTC_H_LFO, {0, 0, 0, 0}, 1, 0, {0, 0, 0, 0}, {0, 0, 0, 0}},   /* lfo */
     {10, 3, 1, OTC_OF_RET | OTC_OF_SUPPORTED, OTC_H_AMP, {0, 0, 0, 0}, 1, 0, {0, 0, 0, 0}, {0, 0, 0, 0}},   /* amp */
@@ -392,6 +441,31 @@ static const otc_op_t otc_ops[OTC_NOPS] = {
     {17, 7, 2, OTC_OF_SUPPORTED | OTC_OF_CARD, OTC_H_NORM, {0, 0, 0, 0}, 64, 0, {0, 0, 0, 0}, {0, 0, 0, 0}},   /* norm */
     {17, 8, 0, OTC_OF_RET | OTC_OF_SUPPORTED | OTC_OF_CARD, OTC_H_FLEX_FIRSTFREE, {0, 0, 0, 0}, 2, 0, {0, 0, 0, 0}, {0, 0, 0, 0}},   /* flex.firstfree */
     {17, 9, 1, OTC_OF_SUPPORTED | OTC_OF_CARD, OTC_H_FLEX_DEL, {2, 0, 0, 0}, 4, 0, {1, 0, 0, 0}, {128, 0, 0, 0}},   /* flex.del */
+    {18, 1, 1, OTC_OF_SUPPORTED, OTC_H_PLAY, {2, 0, 0, 0}, 4, 0, {1, 0, 0, 0}, {8, 0, 0, 0}},   /* play */
+    {18, 2, 0, OTC_OF_RET | OTC_OF_SUPPORTED, OTC_H_SEQ_RUN, {0, 0, 0, 0}, 2, 0, {0, 0, 0, 0}, {0, 0, 0, 0}},   /* seq.run */
+    {18, 3, 1, OTC_OF_RET | OTC_OF_SUPPORTED, OTC_H_SEQ_STEP, {2, 0, 0, 0}, 2, 0, {1, 0, 0, 0}, {8, 0, 0, 0}},   /* seq.step */
+    {18, 4, 1, OTC_OF_RET | OTC_OF_SUPPORTED, OTC_H_SEQ_MUTE, {2, 0, 0, 0}, 2, 0, {1, 0, 0, 0}, {8, 0, 0, 0}},   /* seq.mute */
+    {18, 5, 1, OTC_OF_SUPPORTED, OTC_H_NX_SMP, {2, 0, 0, 0}, 4, 0, {1, 0, 0, 0}, {128, 0, 0, 0}},   /* nx.smp */
+    {18, 6, 2, OTC_OF_SUPPORTED, OTC_H_NX_PL, {2, 0, 0, 0}, 4, 0, {0, 0, 0, 0}, {29, 0, 0, 0}},   /* nx.pl */
+    {18, 16, 0, OTC_OF_RET | OTC_OF_SUPPORTED, OTC_H_NOTE_NUM, {0, 0, 0, 0}, 1, 0, {0, 0, 0, 0}, {0, 0, 0, 0}},   /* note.num */
+    {18, 17, 0, OTC_OF_RET | OTC_OF_SUPPORTED, OTC_H_NOTE_VEL, {0, 0, 0, 0}, 1, 0, {0, 0, 0, 0}, {0, 0, 0, 0}},   /* note.vel */
+    {18, 18, 0, OTC_OF_RET | OTC_OF_SUPPORTED, OTC_H_NOTE_CH, {0, 0, 0, 0}, 1, 0, {0, 0, 0, 0}, {0, 0, 0, 0}},   /* note.ch */
+    {18, 19, 0, OTC_OF_RET | OTC_OF_SUPPORTED, OTC_H_CC_NUM, {0, 0, 0, 0}, 1, 0, {0, 0, 0, 0}, {0, 0, 0, 0}},   /* cc.num */
+    {18, 20, 0, OTC_OF_RET | OTC_OF_SUPPORTED, OTC_H_CC_VAL, {0, 0, 0, 0}, 1, 0, {0, 0, 0, 0}, {0, 0, 0, 0}},   /* cc.val */
+    {18, 21, 0, OTC_OF_RET | OTC_OF_SUPPORTED, OTC_H_CC_CH, {0, 0, 0, 0}, 1, 0, {0, 0, 0, 0}, {0, 0, 0, 0}},   /* cc.ch */
+    {18, 22, 2, OTC_OF_RET | OTC_OF_SUPPORTED, OTC_H_MIDI_CC, {2, 2, 0, 0}, 2, 0, {1, 0, 0, 0}, {16, 127, 0, 0}},   /* midi.cc */
+    {18, 23, 1, OTC_OF_RET | OTC_OF_SUPPORTED, OTC_H_MIDI_NOTE, {2, 0, 0, 0}, 1, 0, {1, 0, 0, 0}, {16, 0, 0, 0}},   /* midi.note */
+    {18, 24, 1, OTC_OF_RET | OTC_OF_SUPPORTED, OTC_H_MIDI_VEL, {2, 0, 0, 0}, 1, 0, {1, 0, 0, 0}, {16, 0, 0, 0}},   /* midi.vel */
+    {18, 25, 0, OTC_OF_RET | OTC_OF_SUPPORTED, OTC_H_TRIG_STEP, {0, 0, 0, 0}, 1, 0, {0, 0, 0, 0}, {0, 0, 0, 0}},   /* trig.step */
+    {18, 26, 0, OTC_OF_RET | OTC_OF_SUPPORTED, OTC_H_TRIG_HIT, {0, 0, 0, 0}, 1, 0, {0, 0, 0, 0}, {0, 0, 0, 0}},   /* trig.hit */
+    {18, 27, 0, OTC_OF_RET | OTC_OF_SUPPORTED, OTC_H_TRIG_VAL, {0, 0, 0, 0}, 1, 0, {0, 0, 0, 0}, {0, 0, 0, 0}},   /* trig.val */
+    {18, 32, 4, OTC_OF_SUPPORTED, OTC_H_SEND_NOTE, {2, 2, 2, 2}, 4, 0, {1, 0, 0, 1}, {16, 127, 127, 32767}},   /* send.note */
+    {18, 33, 3, OTC_OF_SUPPORTED, OTC_H_SEND_CC, {2, 2, 2, 0}, 4, 0, {1, 0, 0, 0}, {16, 127, 127, 0}},   /* send.cc */
+    {18, 34, 2, OTC_OF_SUPPORTED, OTC_H_SEND_PROG, {2, 2, 0, 0}, 4, 0, {1, 0, 0, 0}, {16, 127, 0, 0}},   /* send.prog */
+    {18, 35, 3, OTC_OF_SUPPORTED, OTC_H_SEND_NRPN, {2, 2, 2, 0}, 4, 0, {1, 0, 0, 0}, {16, 16383, 16383, 0}},   /* send.nrpn */
+    {18, 36, 1, OTC_OF_SUPPORTED, OTC_H_GATE, {2, 0, 0, 0}, 2, 0, {1, 0, 0, 0}, {4, 0, 0, 0}},   /* gate */
+    {18, 37, 2, OTC_OF_SUPPORTED, OTC_H_OUT, {2, 0, 0, 0}, 1, 0, {1, 0, 0, 0}, {4, 0, 0, 0}},   /* out */
+    {18, 38, 2, OTC_OF_RET | OTC_OF_SUPPORTED, OTC_H_CV, {5, 2, 0, 0}, 2, 0, {0, 1, 0, 0}, {0, 4, 0, 0}},   /* cv */
 };
 
 #endif

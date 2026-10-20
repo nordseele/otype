@@ -37,16 +37,20 @@ from modules.otype.menu_limits import MAX_SCRIPTS_PER_CATEGORY as MENU_MAX_SCRIP
 show = O.show
 
 # ---- language constants ----------------------------------------------------
-KEYWORDS = {"OTYPE", "DEF", "CONST", "MENU", "PAGE", "ON", "PARAM", "CONFIRM", "INPUT", "SAMPLE", "IF", "ELIF",
+KEYWORDS = {"OTYPE", "DEF", "CONST", "MENU", "PAGE", "ON", "PARAM", "CONFIRM", "INPUT", "SAMPLE", "IN", "VAR", "IF", "ELIF",
+            "LAUNCH",
             "ELSE", "L", "EACH", "PROB", "EVERY", "SKIP", "DEL", "BREAK", "STOP",
             "RET", "ALL", "CUR", "DEEP"}
 VARS = set("ABCDXYZTIJ")
 ASSIGNABLE = set("ABCDXYZT")
-DECLS = {"MENU", "PAGE", "ON", "PARAM", "CONFIRM", "INPUT"}
+DECLS = {"MENU", "PAGE", "ON", "PARAM", "CONFIRM", "INPUT", "VAR", "LAUNCH", "MODULE", "CLOCK"}
 MODIFIERS = {"IF", "ELIF", "ELSE", "L", "EACH", "PROB", "EVERY", "SKIP", "DEL"}
 PROBS = (1, 2, 4, 6, 9, 13, 19, 25, 33, 41, 50, 59, 67, 75, 81, 87, 91, 94, 96, 98, 99)
 COND_WORDS = {"!FILL", "PRE", "!PRE", "NEI", "!NEI", "1ST", "!1ST"}
 FUTURE_HOSTS = {"TRIG", "LOOP", "PAT", "FILL", "LOAD", "MIDI"}
+# 1.1 leaves the script trigs out (no poster yet); the genre-2 bytecode stays, nothing compiles it.  Same
+# literal in firmware/c/otc_comp_parse.c.
+IN_TRIG_SCRIPT_REFUSED = "in trig t script: is not available in 1.1: use in trig t: or in trig t all:"
 RENAMED = {
     "RATCH": "ratch.set",
     "FX.SET": "fx.type",
@@ -79,11 +83,16 @@ REMOVED = {
 
 def retired(w):
     """The refusal message for a renamed or removed operator word, else None."""
+    if w == "MODULE":
+        return "module is gone: use in clock n"
+    if w == "CLOCK":
+        return "clock declaration is gone: use in clock n"
     if w in RENAMED:
         return "%s is now %s" % (show(w), RENAMED[w])
     if w in REMOVED:
         return '%s was removed: write the loop (cookbook "%s")' % (show(w), REMOVED[w])
     return None
+
 
 MAX_LINE = 128
 MAX_STR = 127
@@ -96,12 +105,15 @@ MAX_DEPTH = 8
 MAX_NEST = 8
 MAX_FUNCS = 128
 MENU_BUDGET = 4096
+MODULE_BUDGET = 512
 EACH_ITERS = 64
 LEVEL_MAX = 6
 ACTION_MAX = 10
 PAGE_LABEL_MAX = 8        # `page "LABEL"`: 1..8 printable ASCII characters (0x20..0x7e)
 PAGE_MAX_PARAMS = 6       # a page function has at most 6 params (the 6 encoders A..F)
 PAGE_FORBIDDEN_NS = ("FILE", "SLOT", "POOL")   # namespaces a page function may not use (card, sample slots, pool)
+MODULE_LABEL_MAX = 8      # `module "NAME"`: 1..8 characters
+
 NAME_MAX = 16
 COST_SAT = 0xFFFFFFFF     # costs saturate here (the table does, spec 14); the C does not do big integers
 MAX_FILES = 64            # source files taken from a card (in the given order)
@@ -417,6 +429,7 @@ class Line:
         self.mods = []
         self.stmt = None
         self.decl = None
+        self.in_block = None
         self.children = []
         self.error = False
         self.opens = False
@@ -437,6 +450,42 @@ class Const:
 Param = O.Param
 
 
+class VarInfo:
+    def __init__(self, name, init, scope, slot, line):
+        self.name = name
+        self.init = init
+        self.scope = scope  # "FUNC" or InBlock
+        self.slot = slot    # 0..15
+        self.line = line
+
+
+class InBlock:
+    def __init__(self, kind, line=0, ticks=0, ch=None, num=0, clock=None, name=None):
+        self.kind = kind    # "CLOCK", "NOTE", "CC", "TRIG", "GATE"
+        self.line = line
+        self.ticks = clock if clock is not None else ticks
+        self.clock = self.ticks
+        self.ch = ch        # None or 1..16 or param name; GATE: the output 1..4
+        self.num = num      # if CC: 0..127 or param name
+        self.name = name    # GATE: the master's function name (upper case, <= 8 characters)
+        self.vars = OrderedDict() # vars local to this in-block
+
+    def key(self):
+        return (self.kind, self.ticks, self.ch, self.num, self.name)
+
+    def shown(self):
+        if self.kind == "CLOCK":
+            return "clock %d" % self.ticks
+        if self.kind == "NOTE":
+            return ("note %s" % self.ch) if self.ch is not None else "note"
+        if self.kind == "CC":
+            return "cc %s %s" % (self.ch, self.num)
+        if self.kind == "TRIG":
+            return "trig %s%s" % (self.ch, {1: " all", 2: " script"}.get(self.num, ""))
+        if self.kind == "GATE":
+            return "gate %s %s" % (show(self.name), self.ch)
+        return show(self.kind)
+
 
 class Func:
     def __init__(self, prog, file, line, name):
@@ -446,16 +495,27 @@ class Func:
         self.params = OrderedDict()   # name -> Param (or tuple)
         self.menus = []          # (levels, action, line)
         self.page = None         # (label, line) of the `page "LABEL"` declaration, or None
+        self.module = None       # (label, line) of the `module "NAME"` declaration, or None
+        self.clock = None        # (ticks, line) of the `clock N` declaration, or None
+        self.launch = None       # (ticks, line) of the `launch N` declaration, or None (OTB aux tail)
         self.input_sample = False # input sample declaration
         self.confirm = False
+        self.confirm_line = None # line of confirm declaration, or None
         self.confirm_text = None # (text, line): the first `confirm "TEXT"` with a non-empty text (OTB aux tail), or None
         self.body = []           # top-level Line list
+        self.vars = OrderedDict() # name -> VarInfo
+        self.in_blocks = []      # list of (InBlock, line)
         self.errors = []
         self.has_header_error = False
         self.registered = False
         self.name_span = None
         self.arg_spans = {}      # argument name -> (col, end) on the DEF line
         self.unused = set()      # arguments never used in the body
+
+    @property
+    def is_live(self):
+        return bool(self.in_blocks or self.module is not None)
+
 
     def err(self, line, msg, hidden=False, span=None):
         if span is None and line == self.line and getattr(msg, "span", None) is None:
@@ -630,6 +690,13 @@ class Program:
                 elif w == "DEF":
                     cur = self.load_def(label, li)
                     mine.append(cur)
+                elif w == "VAR":
+                    report(li, cur)
+                    sp = tokspan(li, 0)
+                    if cur is None:
+                        self.file_err(label, li.no, "var at file level is not supported yet", sp)
+                    else:
+                        cur.err(li.no, "var at file level is not supported yet", span=sp)
                 else:
                     report(li, cur)
                     msg = ("%s at column 1: only def, const and otype start in column 1 "
@@ -639,6 +706,7 @@ class Program:
                         self.file_err(label, li.no, msg, sp)
                     else:
                         cur.err(li.no, msg, span=sp)
+
                 first_code = False
             else:
                 first_code = False
@@ -766,6 +834,9 @@ class Program:
         self.check_all()
         self.pass_graph()
         self.pass_page()
+        self.pass_module()
+        self.pass_live()
+        self.pass_events()
         self.pass_input_sample()
         self.pass_needs()
         self.pass_cost()
@@ -1024,7 +1095,7 @@ class Program:
 
     def ntype(self, f, n):
         k = n.kind
-        if k in ("num", "var", "op", "call"):
+        if k in ("num", "var", "var_named", "op", "call"):
             return "INT"
         if k == "param":
             p = f.params.get(n.name)
@@ -1049,6 +1120,12 @@ class Program:
     def check_node(self, f, n, exp, rep, op_name=None):
         k = n.kind
         if k in ("kw", "pred"):
+            return
+        if exp == O.NAME:
+            if not (k == "str" or (k == "const" and self.consts[n.name].type == "STR")):
+                f.err(n.line, "%s expects a function name, got %s" % (op_name or "cv", show(n.text)), span=n.span)
+            elif len(n.val if k == "str" else self.consts[n.name].val) > 8:
+                f.err(n.line, "%s: name is too long (8 characters at most)" % (op_name or "cv"), span=n.span)
             return
         if k == "op":
             for a, ak in zip(n.args, n.kinds):
@@ -1075,6 +1152,8 @@ class Program:
             ecls = self.argkind.get((callee, callee.args[exp[2]]), "INT")
         else:
             ecls = self.exp_class(exp)
+        if ecls == O.NAME:
+            ecls = "STR"
         if have == "FOLDER":
             ok = (op_name == "DIR" and ecls == "STR")
         else:
@@ -1283,6 +1362,134 @@ class Program:
                 if r is not None:
                     f.err(r[1], "op %s not allowed in a page function" % r[0].shown)
 
+    def pass_module(self):
+        """A `module` function must not use an op that reads or writes the card, the sample slots or the pool
+        (namespaces PAGE_FORBIDDEN_NS: dir ext match file.*, static.* slots.*), or confirm, directly or through
+        what it calls. Same rule as pass_page."""
+        memo = {}
+
+        def first_module_bad(f):
+            if f in memo:
+                return memo[f]
+            memo[f] = None
+            best = None
+            if f.confirm:
+                cline = f.confirm_line if f.confirm_line is not None else f.line
+                best = ("confirm not allowed in a live script", cline)
+            for ln in iter_lines(f.body):
+                for r in line_roots(ln):
+                    for n in iter_nodes(r):
+                        if n.kind in ("op", "pred", "setstmt") and n.op is not None \
+                                and n.op.ns in PAGE_FORBIDDEN_NS and (best is None or ln.no < best[1]):
+                            best = ("op %s not allowed in a live script" % n.op.shown, ln.no)
+            if best is None:
+                for g, line in self.cg.get(f, {}).items():
+                    if g in self.cyclic:
+                        continue
+                    r = first_module_bad(g)
+                    if r is not None:
+                        best = (r[0], line)
+                        break
+            memo[f] = best
+            return best
+
+        for f in self.funcs:
+            if f.registered and f.module is not None:
+                r = first_module_bad(f)
+                if r is not None:
+                    f.err(r[1], r[0])
+
+    def pass_live(self):
+        """A live script must not run a menu-only operation (`pat.copy`): it is destructive and its confirmation
+        cannot be asked from a live wake. Same rule as pass_module, for the `in` blocks (a live script), directly or
+        through what it calls: the first such op of f's own text (lowest line; the first in the walk on a tie), else
+        the first callee (in order of first call, cyclic ones skipped) that has one. `op NAME not allowed in a live
+        script` on that line."""
+        memo = {}
+
+        def first_menu_only(f):
+            if f in memo:
+                return memo[f]
+            memo[f] = None
+            best = None
+            for ln in iter_lines(f.body):
+                for r in line_roots(ln):
+                    for n in iter_nodes(r):
+                        if n.kind in ("op", "pred", "setstmt") and n.op is not None \
+                                and getattr(n.op, "menu_only", False) and (best is None or ln.no < best[1]):
+                            best = (n.op, ln.no)
+            if best is None:
+                for g, line in self.cg.get(f, {}).items():
+                    if g in self.cyclic:
+                        continue
+                    r = first_menu_only(g)
+                    if r is not None:
+                        best = (r[0], line)
+                        break
+            memo[f] = best
+            return best
+
+        for f in self.funcs:
+            if f.registered and f.is_live:
+                r = first_menu_only(f)
+                if r is not None:
+                    f.err(r[1], "op %s not allowed in a live script" % r[0].shown)
+
+        nx_memo = {}
+
+        def first_nx(f):
+            if f in nx_memo:
+                return nx_memo[f]
+            nx_memo[f] = None
+            best = None
+            for ln in iter_lines(f.body):
+                for r in line_roots(ln):
+                    for n in iter_nodes(r):
+                        if n.kind in ("op", "pred", "setstmt") and n.op is not None \
+                                and (n.op.name.startswith("NX.") or n.op.name in ("GATE", "OUT", "CV")) \
+                                and (best is None or ln.no < best[1]):
+                            best = (n.op, ln.no)
+            if best is None:
+                for g, line in self.cg.get(f, {}).items():
+                    if g in self.cyclic:
+                        continue
+                    r = first_nx(g)
+                    if r is not None:
+                        best = (r[0], line)
+                        break
+            nx_memo[f] = best
+            return best
+
+        for f in self.funcs:
+            if f.registered and f.module is None:
+                r = first_nx(f)
+                if r is not None:
+                    f.err(r[1], "op %s only allowed in a live script" % r[0].shown)
+
+    def pass_events(self):
+        def check(f, sub, n, kind, genre):
+            nm = n.op.name
+            if nm in ("NOTE.NUM", "NOTE.VEL", "NOTE.CH") and kind != "NOTE":
+                f.err(sub.no, "%s only allowed in an in note block" % n.op.shown)
+            elif nm in ("CC.NUM", "CC.VAL", "CC.CH") and kind != "CC":
+                f.err(sub.no, "%s only allowed in an in cc block" % n.op.shown)
+            elif nm == "TRIG.STEP" and kind != "TRIG":
+                f.err(sub.no, "%s only allowed in an in trig block" % n.op.shown)
+            elif nm == "TRIG.HIT" and (kind != "TRIG" or genre == 2):
+                f.err(sub.no, "%s only allowed in an in trig or in trig all block" % n.op.shown)
+            elif nm == "TRIG.VAL" and (kind != "TRIG" or genre != 2):
+                f.err(sub.no, "%s only allowed in an in trig script block" % n.op.shown)
+
+        for f in self.funcs:
+            for ln in f.body:
+                kind = ln.in_block.kind if ln.in_block is not None else None
+                genre = ln.in_block.num if ln.in_block is not None else None
+                for sub in [ln] + list(iter_lines(ln.children)):
+                    for r in line_roots(sub):
+                        for n in iter_nodes(r):
+                            if n.kind == "op":
+                                check(f, sub, n, kind, genre)
+
     def pass_input_sample(self):
         """A function using an op of namespace AUDIO starting with SRC. (src.*)
         directly or through what it calls must be declared with `input sample`.
@@ -1343,6 +1550,8 @@ class Program:
             self.maxcost[f] = c
             if f.menus and c > MENU_BUDGET:
                 f.err(f.line, "too long: %d/%d" % (min(c, COST_SAT), MENU_BUDGET))
+            if f.module is not None and c > MODULE_BUDGET:
+                f.err(f.line, "too long: %d/%d" % (min(c, COST_SAT), MODULE_BUDGET))
 
     def compute_ranges(self):
         rng = {}
@@ -1469,7 +1678,7 @@ class Program:
         return inner
 
     def cost_stmt(self, f, s, env):
-        if s.kind == "assign":
+        if s.kind in ("assign", "assign_var_named"):
             return self.cost_expr(f, s.args[0], env)
         if s.kind in ("opstmt", "callstmt", "ctxstmt"):
             return self.cost_expr(f, s.node, env)
@@ -1598,6 +1807,12 @@ class BodyParser:
             raise ParseError(retired(w), t)
         if w in VARS:
             return Node("var", w, self.line_no, name=w)
+        if w in fn.vars:
+            vinfo = fn.vars[w]
+            cur_scope = getattr(self, "current_in_block", None)
+            if vinfo.scope != "FUNC" and vinfo.scope is not cur_scope:
+                raise ParseError("var %s is not visible in this block" % show(w), t)
+            return Node("var_named", w, self.line_no, name=w, var_info=vinfo)
         if w in fn.args:
             return Node("arg", w, self.line_no, name=w)
         if w in fn.params:
@@ -1705,6 +1920,20 @@ class BodyParser:
                 else:
                     args.append(Node("num", str(k.default), self.line_no, val=k.default))
                     kinds.append(O.INT)
+            elif k == O.NAME:
+                if self.at_end():
+                    self.need(op, len(args), ot)
+                t = self.next()
+                if t.kind != "WORD":
+                    raise ParseError("%s: expected a function name, got %s" % (op.shown, tokshow(t)), t)
+                prob = name_problem(t.text)
+                if prob:
+                    raise ParseError("%s: %s" % (op.shown, prob), t)
+                if len(t.text) > 8:
+                    raise ParseError("%s: name is too long (%d > 8 characters)"
+                                     % (op.shown, len(t.text)), t)
+                args.append(Node("str", '"%s"' % t.text, self.line_no, val=t.text))
+                kinds.append("STR")
             elif k == O.COND:
                 if self.at_end():
                     self.need(op, len(args), ot)
@@ -1797,6 +2026,17 @@ class BodyParser:
             e = self.parse_term()
             return Node("assign", w, ln, name=w, args=[e])
         fn = self.fn
+        if w in fn.vars:
+            vinfo = fn.vars[w]
+            cur_scope = getattr(self, "current_in_block", None)
+            if vinfo.scope != "FUNC" and vinfo.scope is not cur_scope:
+                raise ParseError("var %s is not visible in this block" % show(w))
+            self.pos += 1
+            if self.at_end():
+                raise ParseError("%s alone does nothing (write %s <value> to assign)"
+                                 % (show(w), show(w)))
+            e = self.parse_term()
+            return Node("assign_var_named", w, ln, name=w, var_info=vinfo, args=[e])
         if w in fn.args:
             raise ParseError("%s is an argument (read-only)" % show(w) if len(self.toks) > self.pos + 1
                              else "%s alone does nothing" % show(w))
@@ -1923,6 +2163,47 @@ class BodyParser:
             elif len(lab) > PAGE_LABEL_MAX:
                 fn.err(line, 'page label "%s" is longer than %d characters' % (lab, PAGE_LABEL_MAX))
             fn.page = (lab, line)
+        elif w == "MODULE":
+            raise ParseError("module is gone: use in clock n")
+        elif w == "CLOCK":
+            raise ParseError("clock declaration is gone: use in clock n")
+        elif w == "VAR":
+            if self.peek() is None:
+                raise ParseError("var expects a name and initial value: var name init")
+            nm = self.next()
+            prob = name_problem(nm.text, nm.kind)
+            if prob:
+                raise ParseError("var %s: %s" % (show(nm.text), prob))
+            if nm.text in fn.args:
+                raise ParseError("var %s has the name of an argument" % show(nm.text))
+            if nm.text in self.prog.consts or nm.text in self.prog.fmap:
+                raise ParseError("var %s has the name of a const or a function" % show(nm.text))
+            if nm.text in fn.params:
+                raise ParseError("var %s has the name of a param" % show(nm.text))
+            if nm.text in fn.vars:
+                raise ParseError("duplicate var declaration %s" % show(nm.text))
+            if len(fn.vars) >= 16:
+                raise ParseError("too many vars in function %s (at most 16)" % show(fn.name))
+            if self.peek() is None:
+                raise ParseError("var %s: initial value is missing" % show(nm.text))
+            v = self.next()
+            if v.kind == "NUM":
+                init_val = v.val
+            elif v.kind == "WORD" and v.text in self.prog.consts and \
+                    not self.prog.consts[v.text].bad and self.prog.consts[v.text].type == "INT":
+                init_val = self.prog.consts[v.text].val
+            else:
+                raise ParseError("var %s: initial value must be a number or an integer const" % show(nm.text))
+            if not -32768 <= init_val <= 32767:
+                raise ParseError("var %s: initial value must fit in 16 bits (-32768..32767)" % show(nm.text))
+            slot = len(fn.vars)
+            scope = getattr(self, "current_in_block", None) or "FUNC"
+            vinfo = VarInfo(nm.text, init_val, scope, slot, line)
+            fn.vars[nm.text] = vinfo
+            if scope != "FUNC":
+                scope.vars[nm.text] = vinfo
+            decl.val = nm.text
+
         elif w == "ON":
             if self.peek() is None:
                 raise ParseError("on expects a host name (on trig, on loop 4 ...)")
@@ -2037,8 +2318,61 @@ class BodyParser:
                 if not lo <= d <= hi:
                     raise ParseError("param %s: need min <= default <= max (got %d %d %d)"
                                      % (show(nm.text), d, lo, hi))
-                fn.params[nm.text] = Param(d, lo, hi, kind="INT")
+                src = None
+                if self.peek() is not None and self.peek().kind == "WORD" and self.peek().text in ("CC", "NOTE", "VEL"):
+                    stok = self.next()
+                    skind = stok.text
+                    if skind == "CC":
+                        if self.peek() is None:
+                            raise ParseError("param %s cc: channel and cc number required" % show(nm.text))
+                        ctok = self.next()
+                        if ctok.kind == "NUM":
+                            ch = ctok.val
+                        elif ctok.kind == "WORD" and ctok.text in fn.params:
+                            raise ParseError("param %s cc: channel cannot be a param (dynamic param not supported)" % show(nm.text))
+                        elif ctok.kind == "WORD" and ctok.text in self.prog.consts and \
+                                not self.prog.consts[ctok.text].bad and self.prog.consts[ctok.text].type == "INT":
+                            ch = self.prog.consts[ctok.text].val
+                        else:
+                            raise ParseError("param %s cc: channel must be 1..16" % show(nm.text))
+                        if isinstance(ch, int) and not 1 <= ch <= 16:
+                            raise ParseError("param %s cc: channel must be 1..16 (got %d)" % (show(nm.text), ch))
+
+                        if self.peek() is None:
+                            raise ParseError("param %s cc: cc number is missing" % show(nm.text))
+                        ntok = self.next()
+                        if ntok.kind == "NUM":
+                            num = ntok.val
+                        elif ntok.kind == "WORD" and ntok.text in fn.params:
+                            raise ParseError("param %s cc: cc number cannot be a param (dynamic param not supported)" % show(nm.text))
+                        elif ntok.kind == "WORD" and ntok.text in self.prog.consts and \
+                                not self.prog.consts[ntok.text].bad and self.prog.consts[ntok.text].type == "INT":
+                            num = self.prog.consts[ntok.text].val
+                        else:
+                            raise ParseError("param %s cc: cc number must be 0..127" % show(nm.text))
+                        if isinstance(num, int) and not 0 <= num <= 127:
+                            raise ParseError("param %s cc: cc number must be 0..127 (got %d)" % (show(nm.text), num))
+                        src = ("cc", ch, num)
+                    elif skind in ("NOTE", "VEL"):
+                        if self.peek() is None:
+                            raise ParseError("param %s %s: channel required" % (show(nm.text), show(skind)))
+                        ctok = self.next()
+                        if ctok.kind == "NUM":
+                            ch = ctok.val
+                        elif ctok.kind == "WORD" and ctok.text in fn.params:
+                            raise ParseError("param %s %s: channel cannot be a param (dynamic param not supported)" % (show(nm.text), show(skind)))
+                        elif ctok.kind == "WORD" and ctok.text in self.prog.consts and \
+                                not self.prog.consts[ctok.text].bad and self.prog.consts[ctok.text].type == "INT":
+                            ch = self.prog.consts[ctok.text].val
+                        else:
+                            raise ParseError("param %s %s: channel must be 1..16" % (show(nm.text), show(skind)))
+                        if isinstance(ch, int) and not 1 <= ch <= 16:
+                            raise ParseError("param %s %s: channel must be 1..16 (got %d)" % (show(nm.text), show(skind), ch))
+                        src = ({"NOTE": "note", "VEL": "vel"}[skind], ch)
+
+                fn.params[nm.text] = Param(d, lo, hi, kind="INT", src=src)
                 decl.val = nm.text
+
         elif w == "CONFIRM":
             if self.peek() is not None:
                 s = self.next()
@@ -2049,6 +2383,25 @@ class BodyParser:
                 if s.val and len(s.val) > 28:
                     fn.warn(line, 'confirm text "%s" longer than 28 chars (clipped in dialog)' % s.val)
             fn.confirm = True
+            fn.confirm_line = line
+        elif w == "LAUNCH":
+            if fn.launch is not None:
+                raise ParseError("duplicate launch declaration (a function has at most one)")
+            if self.peek() is None:
+                raise ParseError("launch expects a number of ticks: launch n")
+            v = self.next()
+            if v.kind == "NUM":
+                ticks = v.val
+            elif v.kind == "WORD" and v.text in self.prog.consts and \
+                    not self.prog.consts[v.text].bad and self.prog.consts[v.text].type == "INT":
+                ticks = self.prog.consts[v.text].val
+            else:
+                raise ParseError("launch n: n must be a number or an integer const")
+            if ticks < 1:
+                raise ParseError("launch n: n must be >= 1 (got %d)" % ticks)
+            if ticks > 32767:
+                raise ParseError("launch n: n must be <= 32767 (got %d)" % ticks)
+            fn.launch = (ticks, line)
         elif w == "INPUT":
             s = self.next()
             if s is None or s.kind != "WORD" or s.text != "SAMPLE":
@@ -2075,6 +2428,10 @@ class BodyParser:
             first = self.peek()
             if first.kind == "WORD" and first.text in DECLS:
                 ln.decl = self.parse_decl(li)
+                return ln
+            if first.kind == "WORD" and first.text == "IN":
+                ln.in_block = self.parse_in_block(li)
+                ln.opens = True
                 return ln
             while True:
                 t = self.peek()
@@ -2106,23 +2463,161 @@ class BodyParser:
             self.fn.err(li.no, str(e), span=tk.span if tk is not None else None)
             ln.error = True
             ln.opens = False
-            ln.mods, ln.stmt, ln.decl = [], None, None
+            ln.mods, ln.stmt, ln.decl, ln.in_block = [], None, None, None
             return ln
+
+    def parse_in_block(self, li):
+        self.next()
+        if self.peek() is None:
+            raise ParseError("in expects an input specifier (in clock N:, in note [ch]:, in cc ch n:, in trig t [all]:)")
+        ktok = self.next()
+        k = ktok.text
+        line = li.no
+        if k == "CLOCK":
+            if self.peek() is None or self.peek().text == ":":
+                raise ParseError("in clock expects a number of ticks: in clock N:")
+            v = self.next()
+            if v.kind == "NUM":
+                ticks = v.val
+            elif v.kind == "WORD" and v.text in self.prog.consts and \
+                    not self.prog.consts[v.text].bad and self.prog.consts[v.text].type == "INT":
+                ticks = self.prog.consts[v.text].val
+            else:
+                raise ParseError("in clock N: N must be a number or an integer const")
+            if ticks < 1:
+                raise ParseError("in clock N: N must be >= 1 (got %d)" % ticks)
+            block = InBlock("CLOCK", line, clock=ticks)
+        elif k == "NOTE":
+            ch = None
+            if self.peek() is not None and self.peek().text != ":":
+                v = self.next()
+                if v.kind == "NUM":
+                    ch = v.val
+                elif v.kind == "WORD" and v.text in self.prog.consts and \
+                        not self.prog.consts[v.text].bad and self.prog.consts[v.text].type == "INT":
+                    ch = self.prog.consts[v.text].val
+                else:
+                    raise ParseError("in note: channel must be 1..16 or an integer const")
+                if not 1 <= ch <= 16:
+                    raise ParseError("in note: channel must be 1..16 (got %d)" % ch)
+            block = InBlock("NOTE", line, ch=ch)
+        elif k == "CC":
+            if self.peek() is None or self.peek().text == ":":
+                raise ParseError("in cc expects channel and cc number: in cc ch n:")
+            v = self.next()
+            if v.kind == "NUM":
+                ch = v.val
+            elif v.kind == "WORD" and v.text in self.prog.consts and \
+                    not self.prog.consts[v.text].bad and self.prog.consts[v.text].type == "INT":
+                ch = self.prog.consts[v.text].val
+            else:
+                raise ParseError("in cc: channel must be 1..16 or an integer const")
+            if not 1 <= ch <= 16:
+                raise ParseError("in cc: channel must be 1..16 (got %d)" % ch)
+            if self.peek() is None or self.peek().text == ":":
+                raise ParseError("in cc ch n: cc number is missing")
+            v2 = self.next()
+            if v2.kind == "NUM":
+                num = v2.val
+            elif v2.kind == "WORD" and v2.text in self.prog.consts and \
+                    not self.prog.consts[v2.text].bad and self.prog.consts[v2.text].type == "INT":
+                num = self.prog.consts[v2.text].val
+            else:
+                raise ParseError("in cc: cc number must be 0..127 or an integer const")
+            if not 0 <= num <= 127:
+                raise ParseError("in cc: cc number must be 0..127 (got %d)" % num)
+            block = InBlock("CC", line, ch=ch, num=num)
+        elif k == "TRIG":
+            if self.peek() is None or self.peek().text == ":":
+                raise ParseError("in trig expects a track: in trig t [all]:")
+            v = self.next()
+            if v.kind == "NUM":
+                t = v.val
+            elif v.kind == "WORD" and v.text in self.prog.consts and \
+                    not self.prog.consts[v.text].bad and self.prog.consts[v.text].type == "INT":
+                t = self.prog.consts[v.text].val
+            else:
+                raise ParseError("in trig: track must be 1..8 or an integer const")
+            if not 1 <= t <= 8:
+                raise ParseError("in trig: track must be 1..8 (got %d)" % t)
+            every = 0
+            if self.peek() is not None and self.peek().kind == "WORD" and self.peek().text == "ALL":
+                self.next()
+                every = 1
+            elif self.peek() is not None and self.peek().kind == "WORD" and self.peek().text == "SCRIPT":
+                raise ParseError(IN_TRIG_SCRIPT_REFUSED)
+            block = InBlock("TRIG", line, ch=t, num=every)
+        elif k == "GATE":
+            if self.peek() is None or self.peek().text == ":":
+                raise ParseError("in gate expects a script name and an output: in gate NAME n:")
+            nm = self.next()
+            if nm.kind != "WORD":
+                raise ParseError("in gate: expected a function name, got %s" % tokshow(nm))
+            prob = name_problem(nm.text)
+            if prob:
+                raise ParseError("in gate: " + prob)
+            if len(nm.text) > 8:
+                raise ParseError("in gate: name is too long (%d > 8 characters)" % len(nm.text))
+            v = self.next()
+            if v.kind == "NUM":
+                n = v.val
+            elif v.kind == "WORD" and v.text in self.prog.consts and \
+                    not self.prog.consts[v.text].bad and self.prog.consts[v.text].type == "INT":
+                n = self.prog.consts[v.text].val
+            else:
+                raise ParseError("in gate: output must be 1..4 or an integer const")
+            if not 1 <= n <= 4:
+                raise ParseError("in gate: output must be 1..4 (got %d)" % n)
+            block = InBlock("GATE", line, ch=n, name=nm.text)
+        else:
+            raise ParseError("unknown input kind %s: use in clock n, in note [ch], in cc ch n, in trig t [all]"
+                             % show(k))
+
+        if self.peek() is not None and self.peek().kind == "SYM" and self.peek().text == ":":
+            self.next()
+        if self.peek() is not None:
+            raise ParseError("unexpected %s after in %s declaration" % (tokshow(self.peek()), show(k)))
+        if not li.opens:
+            raise ParseError("in %s: line must end with ':'" % show(k))
+
+        # Check duplicate
+        for b in self.fn.in_blocks:
+            if b.key() == block.key():
+                if block.kind == "CLOCK":
+                    raise ParseError("duplicate in clock %d" % block.clock)
+                elif block.kind == "NOTE":
+                    if block.ch is None:
+                        raise ParseError("duplicate in note")
+                    else:
+                        raise ParseError("duplicate in note %d" % block.ch)
+                elif block.kind == "CC":
+                    raise ParseError("duplicate in cc %d %d" % (block.ch, block.num))
+                elif block.kind == "TRIG":
+                    raise ParseError("duplicate in trig %d%s" % (block.ch, " all" if block.num else ""))
+                elif block.kind == "GATE":
+                    raise ParseError("duplicate in gate %s %d" % (show(block.name), block.ch))
+
+        self.fn.in_blocks.append(block)
+        if block.kind == "CLOCK" and self.fn.clock is None:
+            self.fn.clock = (block.clock, block.line)
+        self.fn.module = (self.fn.name, block.line)
+        return block
 
     def parse(self):
         fn = self.fn
         root = []
-        stack = [(None, root)]     # (indent, lines)
+        stack = [(None, root, None)]     # (indent, lines, in_block)
         pending = None
+        self.current_in_block = None
         for li in fn.lines:
             for m in li.errs:
                 fn.err(li.no, m)
             if li.blank:
                 continue
-            line = self.parse_line(li)
             if pending is not None:
                 if li.indent > pending.indent:
-                    stack.append((li.indent, pending.children))
+                    cur_in = pending.in_block if pending.in_block is not None else stack[-1][2]
+                    stack.append((li.indent, pending.children, cur_in))
                     if len(stack) - 1 > MAX_NEST:
                         fn.err(li.no, "blocks nested deeper than %d" % MAX_NEST)
                 else:
@@ -2130,18 +2625,22 @@ class BodyParser:
                                        "lines below it")
                 pending = None
             if stack[0][0] is None:
-                stack[0] = (li.indent, root)
+                stack[0] = (li.indent, root, None)
             # indentation against the enclosing blocks
             popped = False
             while li.indent < stack[-1][0] and len(stack) > 1:
                 stack.pop()
                 popped = True
+            self.current_in_block = stack[-1][2]
             if li.indent > stack[-1][0] and popped:
                 fn.err(li.no, "indentation does not match any enclosing block")
             elif li.indent > stack[-1][0]:
                 fn.err(li.no, "unexpected indentation (no block was opened above)")
             elif li.indent < stack[-1][0]:
                 fn.err(li.no, "indentation does not match the function body")
+            line = self.parse_line(li)
+            if line.in_block is not None and len(stack) > 1:
+                fn.err(li.no, "in block must be at the root of the function")
             lines = stack[-1][1]
             prev = lines[-1] if lines else None
             fk = line.first_kind()
@@ -2162,13 +2661,28 @@ class BodyParser:
             if ln.decl is not None or (ln.error and ln.first_word in DECLS):
                 if seen_stmt:
                     fn.err(ln.no, "declaration %s after the first statement" % show(ln.first_word))
+            elif ln.in_block is not None:
+                seen_stmt = True
+                seen_sub_stmt = False
+                for sub in ln.children:
+                    if sub.decl is not None:
+                        if sub.decl.text != "VAR":
+                            fn.err(sub.no, "declaration %s inside a block" % show(sub.first_word))
+                        elif seen_sub_stmt:
+                            fn.err(sub.no, "declaration %s after the first statement" % show(sub.first_word))
+                    elif sub.stmt is not None or sub.mods:
+                        seen_sub_stmt = True
             else:
                 seen_stmt = True
+                if fn.in_blocks:
+                    fn.err(ln.no, "statement outside any in block (a live script organizes its code in 'in' blocks)")
+
         for ln in root:
-            for sub in iter_lines(ln.children):
-                if sub.decl is not None:
-                    fn.err(sub.no, "declaration %s inside a block" % show(sub.first_word))
-        if fn.params and not fn.menus and fn.page is None:
+            if ln.in_block is None:
+                for sub in iter_lines(ln.children):
+                    if sub.decl is not None:
+                        fn.err(sub.no, "declaration %s inside a block" % show(sub.first_word))
+        if fn.params and not fn.menus and fn.page is None and not fn.is_live:
             for ln in iter_lines(root):
                 if ln.decl is not None and ln.decl.text == "PARAM":
                     fn.err(ln.no, "a brick cannot declare param; pass the value as an argument")
@@ -2181,7 +2695,19 @@ class BodyParser:
                 if getattr(p, "kind", "INT") == "FOLDER":
                     fn.err(fn.page[1], "page function cannot declare a folder param")
                     break
-        if not any(ln.decl is None and ln.first_word not in DECLS for ln in iter_lines(root)):
+        if fn.launch is not None and not fn.is_live:
+            fn.err(fn.launch[1], "launch is only allowed in a live script")
+        if fn.is_live:
+            if len(fn.name) > MODULE_LABEL_MAX:
+                fn.err(fn.line, "live script name %s is longer than %d characters" % (show(fn.name), MODULE_LABEL_MAX))
+            if fn.page is not None:
+                fn.err(fn.page[1], "a live script cannot declare a page")
+            if fn.args:
+                fn.err(fn.line, "a live script takes no arguments")
+            if fn.confirm:
+                cline = fn.confirm_line if fn.confirm_line is not None else fn.line
+                fn.err(cline, "confirm not allowed in a live script")
+        if not any(ln.decl is None and ln.in_block is None and ln.first_word not in DECLS for ln in iter_lines(root)):
             fn.err(fn.line, "no statement in the body")
 
 
@@ -2242,7 +2768,11 @@ def report(prog, verbose, out=None):
             where = menu_path(f) if f.menus else "(brick, no menu)"
             if f.page is not None:
                 where = (where + "; " if f.menus else "") + 'page "%s"' % f.page[0]
-            budget = "/%d" % MENU_BUDGET if f.menus else ""
+            if f.module is not None:
+                where = (where + "; " if f.menus or f.page is not None else "") + 'module "%s" (clock %d)' % (f.module[0], f.clock[0])
+            if f.launch is not None:
+                where += "; launch %d" % f.launch[0]
+            budget = "/%d" % MENU_BUDGET if f.menus else ("/%d" % MODULE_BUDGET if f.module is not None else "")
             print("  ok  %-16s %s  [%s]  max cost %d%s  (%s:%d)"
                   % (show(f.name), where, ", ".join(flags) or "-", cost, budget, f.file, f.line),
                   file=out)
@@ -2282,6 +2812,8 @@ def ops_report(md=False, out=None):
                     notes.append("destructive")
                 if o.stmt_only:
                     notes.append("statement only")
+                if o.menu_only:
+                    notes.append("menu scripts only")
                 doc = o.doc + (" (%s)" % ", ".join(notes) if notes else "")
                 alias = " ".join("`%s`" % a for a in o.aliases)
                 print("| %s | %s | %s |" % (sig, alias, doc), file=out)
@@ -2295,6 +2827,8 @@ def ops_report(md=False, out=None):
                     notes.append("destructive")
                 if o.stmt_only:
                     notes.append("statement only")
+                if o.menu_only:
+                    notes.append("menu scripts only")
                 note = ("  [%s]" % ", ".join(notes)) if notes else ""
                 print("  %-30s %s%s%s" % (op_sig(o), o.doc, alias, note), file=out)
             print(file=out)
@@ -2308,6 +2842,10 @@ KEYWORD_DOCS = (
     ("const", "const name value", "file-level constant (number, string, list or condition), global to all files"),
     ("menu", 'menu "LEVEL" >> "ACTION"', "place of the function in the menu (levels up to 6 chars, action up to 10)"),
     ("page", 'page "LABEL"', "list the function on the SCRIPT page of the unit (label 1..8 characters; no argument, at most 6 params, no card/slot/pool op)"),
+    ("var", "var name init", "persistent variable initialized to init (integer constant) on script load"),
+    ("in", "in clock n: | in note [ch]: | in cc ch n: | in trig t [all]:",
+     "event block for periodic clock, incoming MIDI note / CC events, or the sequencer's trigs"),
+    ("launch", "launch n", "live script: quantize the first wake to the next multiple of n ticks of the grid (96 = a beat)"),
     ("on", "on host [args]", "run on another trigger (on trig, on loop 4); warning until the host exists"),
     ("param", 'param name [int] d min max | bool d | option d "a"... | folder "path"',
      "a setting editable on the unit: number in range, bool (yes/no), option (labels) or folder browser"),
@@ -2383,6 +2921,9 @@ def check_json(prog):
             "name": show(f.name), "file": f.file, "line": f.line,
             "args": [show(a) for a in f.args], "menu": menu,
             "page": f.page[0] if f.page is not None else None,
+            "module": f.module[0] if f.module is not None else None,
+            "clock": f.clock[0] if f.clock is not None else None,
+            "launch": f.launch[0] if f.launch is not None else None,
             "params": [{"name": show(n), "default": v[0], "min": v[1], "max": v[2]}
                        for n, v in f.params.items()],
             "returns": ret, "destructive": bool(prog.destructive.get(f)),
@@ -2425,7 +2966,8 @@ def op_json(o):
     return {"name": o.shown, "signature": o.signature(), "args": [O.kind_name(k) for k in o.args],
             "argnames": names, "ret": o.ret is not None, "doc": o.doc, "category": o.category,
             "alias": [show(a) for a in o.aliases], "settable": o.settable, "stmt_only": o.stmt_only,
-            "family": o.family, "destructive": o.destructive, "predicate": o.predicate,
+            "family": o.family, "destructive": o.destructive, "menu_only": o.menu_only,
+            "predicate": o.predicate,
             "minArgs": minn, "maxArgs": maxn}
 
 

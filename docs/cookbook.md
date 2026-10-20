@@ -499,6 +499,78 @@ def norm_folder
 level (-12..0 dB), updating the `.ot` metadata in place without destructive audio rewrites.
 (Experimental. A very large folder is slow to read on the unit itself, before the first file is processed: allow time.)
 
+## 21. Live sequencing module
+
+```otype
+def pulse_m
+  in clock 24:
+    if eq seq.mute 1 0:
+      nx.smp rrand 1 4
+      nx.pl fx1 1 rrand 40 110
+      play 1
+```
+
+`in clock N:` registers a live sequencer module executed every N ticks (24 ticks = 1 quarter note). On each clock tick, the module can query sequencer status (`seq.run`, `seq.step t`, `seq.mute t`), prepare per-hit locks for the next hit with `nx.smp n` (Static sample slot 1..128) and `nx.pl p v` (parameter `p` in 0..29, clamped by the part's descriptor like `pl.set`), and schedule track playback with `play t` (which consumes and resets the `nx.*` locks). In v1, the first trigger right after PLAY may be delayed by up to one timer period (~10 ms); all subsequent triggers fall on the step grid. While a menu script is running or awaiting user input (`ask`, `confirm`), modules are silent; their deadlines are skipped and counted, and they resume on the grid afterwards.
+
+## 22. Record a loop on the trigs
+
+```otype
+def rec_bar
+  menu "REC" >> "LOOP 4"
+  rec.src 1 1 2
+  rec.len 1 4
+  rt.add 1
+```
+
+Places a recorder trig on step 1 of the track in context, listening to input A (INAB = 2 on track 1) for four
+steps (RLEN 4): at 120 BPM the recorder writes exactly 22 050 samples and stops. `rt.add s src` with the
+mask 1 (AB), 2 (CD), 4 (internal) and 7 for all three, as the stock trig does; `rt.del s` removes the recorder
+trig of a step (its sources, one-shot flag and micro-timing) and `rt.clr` removes them all. `rec.src t n v`
+and `rec.len t v` are the RECORDING SETUP values of a track, stored in the part like the page's own knobs.
+
+## 23. One take, then the next script arms it again
+
+```otype
+def one_take
+  ro.add 1
+  rec.trig 1 0
+  rec.loop 1 1
+```
+
+`ro.add s [src]` is a recorder trig with the one-shot state: it records once, and the next time the pattern
+reaches the step it stays silent, as a one-shot sample trig does. `rec.trig t v` picks ONE (0), ONE-2 (1) or
+HOLD (2) and `rec.loop t v` whether the take loops when played back. To take another one, re-arm with
+`os.arm` (all one-shot trigs of the track) — that is what [STOP]+[STOP] does for the whole pattern.
+`rec.arm t [src]` starts a recording without waiting for a trig: it is the panel's [TRACK]+[AUDIO REC], QREC
+included.
+
+## 24. Mirror an external controller
+
+```otype
+def cut
+  pl.set 1 10 midi.cc 1 74
+def n2trk
+  in note 1:
+    play sub midi.note 1 59
+```
+
+`midi.cc ch n`, `midi.note ch` and `midi.vel ch` read what the last MIDI message received on a channel left
+behind, so a knob on another box can drive a p-lock. `send.nrpn ch p v` is the output side: one NRPN as its
+four Control Changes, all four or none if the transmit buffer is short.
+
+## 25. Copy a pattern from a script
+
+```otype
+def keep_it
+  pat.copy 1 2
+```
+
+`pat.copy a b` is [FUNCTION]+[STOP] without the clipboard: pattern a lands on pattern b of the current bank,
+trigs, locks, length and the part assigned together, in the bank and in the pattern's SRAM copy. The stock's
+undo snapshot is taken first, so `UNDO PATTERN` can bring the old b back; a copy waiting in the pattern
+clipboard is left alone. It is a menu script: a live script is refused (`op pat.copy not allowed in a live
+script`), and the run stops if `a` is `b`.
+
 ## Limits worth knowing
 
 - 4096 operations per press (the checker prints each function's worst case); 4096 file names per list.

@@ -248,7 +248,7 @@ int32_t otb_host_control_write(uint32_t h, uint32_t t, uint32_t n, int32_t v)
 int32_t otb_host_control_action(otc_vm_t *vm, uint32_t h, int32_t a, int32_t b)
 {
     int32_t rc = h_action ? h_action(vm, h, a, b) : OTC_E_UNSUPPORTED;
-    if (!rc && (h == OTC_H_PAT_GO || h == OTC_H_PART_GO || h == OTC_H_PART_RELOAD) && h_cread)
+    if (!rc && (h == OTC_H_PAT_GO || h == OTC_H_PAT_COPY || h == OTC_H_PART_GO || h == OTC_H_PART_RELOAD) && h_cread)
         vm->length = (uint8_t)h_cread(OTC_H_PAT_LEN, vm->host_track - 1, 0);
     return rc;
 }
@@ -343,4 +343,233 @@ int32_t otb_host_norm(const char *path, int32_t db)
 {
     return h_anorm ? h_anorm(path, db) : 0;
 }
+
+typedef void (*hk_mplay)(uint32_t, const uint8_t *);
+typedef uint32_t (*hk_srun)(void);
+typedef uint32_t (*hk_sstep)(uint32_t);
+typedef uint32_t (*hk_smute)(uint32_t);
+
+static hk_mplay h_mplay;
+static hk_srun h_srun;
+static hk_sstep h_sstep;
+static hk_smute h_smute;
+
+void otb_shim_set_seq(void *mplay, void *srun, void *sstep, void *smute)
+{
+    h_mplay = (hk_mplay)mplay;
+    h_srun = (hk_srun)srun;
+    h_sstep = (hk_sstep)sstep;
+    h_smute = (hk_smute)smute;
+}
+
+void otb_host_module_play(uint32_t track0, const uint8_t *locks32)
+{
+    if (h_mplay)
+        h_mplay(track0, locks32);
+}
+
+uint32_t otb_host_seq_run(void)
+{
+    return h_srun ? h_srun() : 0;
+}
+
+uint32_t otb_host_seq_step(uint32_t track0)
+{
+    return h_sstep ? h_sstep(track0) : 1;
+}
+
+uint32_t otb_host_seq_mute(uint32_t track0)
+{
+    return h_smute ? h_smute(track0) : 0;
+}
+
+typedef uint32_t (*hk_notenum)(void);
+typedef uint32_t (*hk_notevel)(void);
+typedef uint32_t (*hk_notech)(void);
+typedef uint32_t (*hk_ccnum)(void);
+typedef uint32_t (*hk_ccval)(void);
+typedef uint32_t (*hk_ccch)(void);
+typedef uint32_t (*hk_curev)(void);
+
+static hk_notenum h_notenum;
+static hk_notevel h_notevel;
+static hk_notech h_notech;
+static hk_ccnum h_ccnum;
+static hk_ccval h_ccval;
+static hk_ccch h_ccch;
+static hk_curev h_curev;
+
+static uint32_t s_note_num = 0, s_note_vel = 0, s_note_ch = 1;
+static uint32_t s_cc_num = 0, s_cc_val = 0, s_cc_ch = 1;
+static uint32_t s_trig_track = 1, s_trig_step = 0, s_trig_hit = 0, s_trig_val = 0, s_trig_genre = 0;
+static uint32_t s_cur_ev_type = 0;
+
+void otb_shim_set_midi(void *notenum, void *notevel, void *notech,
+                       void *ccnum, void *ccval, void *ccch, void *curev)
+{
+    h_notenum = (hk_notenum)notenum;
+    h_notevel = (hk_notevel)notevel;
+    h_notech = (hk_notech)notech;
+    h_ccnum = (hk_ccnum)ccnum;
+    h_ccval = (hk_ccval)ccval;
+    h_ccch = (hk_ccch)ccch;
+    h_curev = (hk_curev)curev;
+}
+
+void otb_shim_set_event(uint32_t type, uint32_t ch, uint32_t num, uint32_t val)
+{
+    s_cur_ev_type = type;
+    if (type == 2) { /* NOTE */
+        s_note_ch = ch;
+        s_note_num = num;
+        s_note_vel = val;
+    } else if (type == 3) { /* CC */
+        s_cc_ch = ch;
+        s_cc_num = num;
+        s_cc_val = val;
+    } else if (type == 4 || type == 5) { /* TRIG: ch = track, num = step, val = hit (0/1) or the script trig's value;
+                                          * type 5 = a script trig (genre 2), type 4 = the sequencer's (genre 0) */
+        s_cur_ev_type = 4;
+        s_trig_genre = (type == 5) ? 2 : 0;
+        s_trig_track = ch;
+        s_trig_step = num;
+        s_trig_hit = val ? 1 : 0;
+        s_trig_val = val;
+    }
+}
+
+uint32_t otb_host_note_num(void) { return h_notenum ? h_notenum() : s_note_num; }
+uint32_t otb_host_note_vel(void) { return h_notevel ? h_notevel() : s_note_vel; }
+uint32_t otb_host_note_ch(void)  { return h_notech ? h_notech() : s_note_ch; }
+uint32_t otb_host_cc_num(void)   { return h_ccnum ? h_ccnum() : s_cc_num; }
+uint32_t otb_host_cc_val(void)   { return h_ccval ? h_ccval() : s_cc_val; }
+uint32_t otb_host_cc_ch(void)    { return h_ccch ? h_ccch() : s_cc_ch; }
+uint32_t otb_host_trig_track(void) { return s_trig_track; }
+uint32_t otb_host_trig_step(void)  { return s_trig_step; }
+uint32_t otb_host_trig_hit(void)   { return s_trig_hit; }
+uint32_t otb_host_trig_val(void)   { return s_trig_val; }
+uint32_t otb_host_trig_genre(void) { return s_trig_genre; }
+uint32_t otb_host_cur_ev_type(void) { return h_curev ? h_curev() : s_cur_ev_type; }
+
+typedef int32_t (*hk_cv)(const char *name, uint32_t len, uint32_t out);
+typedef void (*hk_gate)(uint32_t out);
+typedef void (*hk_out)(uint32_t out, int32_t v);
+
+static hk_cv h_cv;
+static hk_gate h_gate;
+static hk_out h_out;
+static uint8_t s_gate_name[8];
+static uint32_t s_gate_out = 1;
+
+void otb_shim_set_gate(void *cv, void *gate, void *out)
+{
+    h_cv = (hk_cv)cv;
+    h_gate = (hk_gate)gate;
+    h_out = (hk_out)out;
+}
+
+/* the current event is a script gate: its source name (up to 8 characters, zero padded) and its output */
+void otb_shim_set_gate_event(const char *name, uint32_t out)
+{
+    uint32_t i;
+    s_cur_ev_type = OTC_EV_GATE;
+    for (i = 0; i < 8u && name && name[i]; i++)
+        s_gate_name[i] = (uint8_t)name[i];
+    for (; i < 8u; i++)
+        s_gate_name[i] = 0;
+    s_gate_out = out;
+}
+
+void otb_host_gate(uint32_t out) { if (h_gate) h_gate(out); }
+void otb_host_out(uint32_t out, int32_t v) { if (h_out) h_out(out, v); }
+int32_t otb_host_cv(const char *name, uint32_t len, uint32_t out)
+{
+    return h_cv ? h_cv(name, len, out) : 0;
+}
+uint32_t otb_host_gate_out(void) { return s_gate_out; }
+void otb_host_cur_ev_name(uint8_t *out8)
+{
+    uint32_t i;
+    for (i = 0; i < 8u; i++)
+        out8[i] = s_gate_name[i];
+}
+
+static uint32_t s_gate_ran, s_gate_deferred;
+void otb_shim_set_gate_ran(uint32_t ran) { s_gate_ran = ran ? 1u : 0u; }
+uint32_t otb_shim_gate_deferred(void) { return s_gate_deferred; }
+uint32_t otb_host_gate_ran(void) { return s_gate_ran; }
+void otb_host_gate_defer(void) { s_gate_deferred++; }
+
+typedef void (*hk_sendnote)(uint32_t ch, uint32_t note, uint32_t vel, uint32_t dur);
+typedef void (*hk_sendcc)(uint32_t ch, uint32_t num, uint32_t val);
+typedef void (*hk_sendprog)(uint32_t ch, uint32_t prog);
+
+static hk_sendnote h_sendnote;
+static hk_sendcc h_sendcc;
+static hk_sendprog h_sendprog;
+
+void otb_shim_set_midi_out(void *sendnote, void *sendcc, void *sendprog)
+{
+    h_sendnote = (hk_sendnote)sendnote;
+    h_sendcc = (hk_sendcc)sendcc;
+    h_sendprog = (hk_sendprog)sendprog;
+}
+
+void otb_host_send_note(uint32_t ch, uint32_t note, uint32_t vel, uint32_t dur)
+{
+    if (h_sendnote)
+        h_sendnote(ch, note, vel, dur);
+}
+
+void otb_host_send_cc(uint32_t ch, uint32_t num, uint32_t val)
+{
+    if (h_sendcc)
+        h_sendcc(ch, num, val);
+}
+
+void otb_host_send_prog(uint32_t ch, uint32_t prog)
+{
+    if (h_sendprog)
+        h_sendprog(ch, prog);
+}
+
+/* The MIDI IN tables and the NRPN sender.  The tables are what the unit's MIDI IN hook leaves behind:
+ * the last CC value per (channel, controller), the last note and its velocity per channel. */
+static uint8_t s_midi_cc[16 * 128];
+static uint8_t s_midi_note[16], s_midi_vel[16];
+
+void otb_shim_midi_in(uint32_t ch, uint32_t num, uint32_t val)
+{
+    if (ch < 1 || ch > 16 || num > 127) return;
+    s_midi_cc[(ch - 1) * 128 + num] = (uint8_t)val;
+    s_midi_note[ch - 1] = (uint8_t)num;
+    s_midi_vel[ch - 1] = (uint8_t)val;
+}
+
+void otb_shim_midi_in_clear(void)
+{
+    uint32_t i;
+    for (i = 0; i < 16 * 128; i++) s_midi_cc[i] = 0;
+    for (i = 0; i < 16; i++) { s_midi_note[i] = 0; s_midi_vel[i] = 0; }
+}
+
+uint32_t otb_host_midi_cc(uint32_t ch, uint32_t num)
+{
+    if (ch < 1 || ch > 16 || num > 127) return 0;
+    return s_midi_cc[(ch - 1) * 128 + num];
+}
+
+uint32_t otb_host_midi_note(uint32_t ch) { return ch >= 1 && ch <= 16 ? s_midi_note[ch - 1] : 0; }
+uint32_t otb_host_midi_vel(uint32_t ch) { return ch >= 1 && ch <= 16 ? s_midi_vel[ch - 1] : 0; }
+
+void otb_host_send_nrpn(uint32_t ch, uint32_t par, uint32_t val)
+{
+    if (h_sendcc) {
+        h_sendcc(ch, 99, (par >> 7) & 0x7F);
+        h_sendcc(ch, 98, par & 0x7F);
+        h_sendcc(ch, 6, (val >> 7) & 0x7F);
+        h_sendcc(ch, 38, val & 0x7F);
+    }
+}
+
 

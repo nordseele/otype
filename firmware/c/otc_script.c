@@ -178,7 +178,48 @@ OTS_NOIDIOM static void ots_actions(ots_ctx_t *c)
         const uint8_t *e = t + ftab + k * 54u;
         uint32_t moff = ots_rd16(e + 16);
         const uint8_t *p;
-        if (!moff || pool + moff + 2 > len)
+        if (!moff) {
+            if (ots_rd16(e + 18) & 0x40u) { /* MODULE */
+                uint32_t aux_off = ots_rd16(t + 16);
+                uint32_t faux = ots_rd16(e + 48);
+                uint32_t nparams = e[33];
+                uint32_t nargs = e[32];
+                uint32_t nctr = e[38];
+                uint32_t mo = ots_rd16(t + aux_off + faux + nparams * 8u + nargs * 2u + nctr * 4u);
+                if (mo && pool + mo + 2 <= len) {
+                    uint32_t pn = t[pool + mo + 1], q;
+                    uint32_t sat = 0, lat = 0;
+                    char *sh, *lg;
+                    uint8_t *r;
+                    c->nmenus++;
+                    if (c->nacts >= OTS_MAXACT) {
+                        c->ncut++;
+                        continue;
+                    }
+                    sh = c->shorts + c->nacts * OTS_SLEN;
+                    lg = c->longs + c->nacts * OTS_LLEN;
+                    ots_cat(lg, &lat, OTS_LLEN, "MODULE>");
+                    for (q = 0; q < pn && lat < OTS_LONG; q++)
+                        lg[lat++] = (char)t[pool + mo + 2 + q];
+                    lg[lat] = 0;
+                    for (q = 0; q < pn && sat < OTS_SHORT; q++)
+                        sh[sat++] = (char)t[pool + mo + 2 + q];
+                    sh[sat] = 0;
+                    r = c->acts + c->nacts * 16u;
+                    ots_wr32(r, c->entry);
+                    ots_wr32(r + 4, (uint32_t)(uintptr_t)sh);
+                    ots_wr32(r + 8, (uint32_t)(uintptr_t)lg);
+                    r[12] = 0;
+                    r[13] = (uint8_t)c->nacts;
+                    r[14] = (uint8_t)(c->nacts >> 8);
+                    r[15] = (uint8_t)c->nacts;
+                    c->slotfn[c->nacts] = (uint8_t)k;
+                    c->nacts++;
+                }
+            }
+            continue;
+        }
+        if (pool + moff + 2 > len)
             continue;
         p = t + pool + moff;
         if (p[0] != 4)
