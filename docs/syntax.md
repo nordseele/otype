@@ -1,6 +1,7 @@
-# OType — syntax, version 1 (2026-10-11)
+# OType — syntax, version 1.1 (2026-10-20)
 
-**Status: OType v1 is implemented** (checker, simulator, Python VM, C virtual machine and compiler, `/SCRIPTS` loader).
+**Status: OType 1.1 is implemented** (checker, simulator, Python VM, C virtual machine and compiler, `/SCRIPTS` loader,
+live scripts, MIDI in and out, the recorder, linked scripts).
 The registry's evidence level (`level`, §8) says which operations are confirmed on the unit and which still wait
 for a hardware check (NOT TESTED on an MKI).
 This document is the grammar and the design; the complete, current list of operations is the command reference

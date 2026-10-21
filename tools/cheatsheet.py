@@ -32,6 +32,8 @@ steps has.trig:                  # block: the steps that have a trig
   each: cond.set i 50%"""
 TUTORIAL = os.path.join(ROOT, "modules", "otype", "examples", "TUTORIAL.OTY")
 
+VERSION = "1.1"       # the release the page documents; the language version stays 1 (`otype 1`)
+
 # (section title, [(category, sub-heading or None, filter)])
 STRUCTURE = ("OTYPE", "DEF", "CONST", "MENU", "PAGE", "VAR", "IN", "LAUNCH", "ON", "PARAM", "CONFIRM", "INPUT")
 MODIFIERS = ("IF", "ELIF", "ELSE", "L", "EACH", "PROB", "EVERY", "SKIP", "DEL")
@@ -64,7 +66,7 @@ SECTIONS = [
     ("Files", [("FILES", None, None)]),
     ("Slots", [("SLOTS", None, None)]),
     ("Audio", [("AUDIO", None, None)]),
-    ("Modules", [("MODULES", None, None)]),
+    ("Live scripts", [("MODULES", None, None)]),
     ("Screen", [("UI", None, None)]),
 ]
 
@@ -83,7 +85,7 @@ CATEGORY_SUMMARIES = {
     "FILES": "List and filter the files of a card folder, then pick from the list.",
     "SLOTS": "Load, test, clear and swap Static and Flex slots; keep a working set of slot numbers. Bulk jobs are loops: see the cookbook.",
     "AUDIO": "Save audio takes, create sliced chains and normalize files.",
-    "MODULES": "Live sequencing modules: schedule voice playback and read sequencer state.",
+    "MODULES": "Live scripts: schedule voice playback, read sequencer and MIDI events, link scripts.",
     "UI": "The text of the end box: msg replaces DONE with strings and numbers.",
 }
 
@@ -249,7 +251,7 @@ def build(fragment):
         overview.append(f'<tr><th scope="row"><a href="#{sid}">{html.escape(title)}</a></th>'
                         f'<td>{len(by_cat[cat])}</td><td>{html.escape(CATEGORY_SUMMARIES[cat])}</td></tr>')
 
-    body = PAGE.format(css=open(CSS_FILE, encoding="utf-8").read(), js=JS, wordmark=wordmark_svg(WORDMARK), steps=STEPS, n_ops=n_ops, example_line=highlight(EXAMPLE_LINE), letters=letters, examples=examples,
+    body = PAGE.format(css=open(CSS_FILE, encoding="utf-8").read(), js=JS, wordmark=wordmark_svg(WORDMARK), steps=STEPS, n_ops=n_ops, version=VERSION, example_line=highlight(EXAMPLE_LINE), letters=letters, examples=examples,
                        sections="".join(sections), nav=nav, overview="".join(overview), n_cats=len(overview))
     if fragment:
         return body
@@ -355,14 +357,14 @@ PAGE = """<title>OType Command Reference</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,300;0,400;0,600;1,400&display=swap">
 <style>{css}</style>
 <div class="wrap">
-<div class="bar"><span class="cell first">OTYPE</span><span class="cell">v1</span><span class="cell">{n_ops} ops</span><span class="cell end">octatrack</span><button id="theme" class="cell" type="button">dark</button></div>
+<div class="bar"><span class="cell first">OTYPE</span><span class="cell">{version}</span><span class="cell">{n_ops} ops</span><span class="cell end">octatrack</span><button id="theme" class="cell" type="button">dark</button></div>
 <header class="top">
   <h1 aria-label="otype">{wordmark}</h1>
   <p class="tag">simple yet powerful scripting for the octatrack · <a href="roadmap.html">roadmap</a> · <a href="https://github.com/nordseele/otype">github</a></p>
   <div class="steps" aria-hidden="true">{steps}</div>
 </header>
 <div class="overview">
-  <h2><span class="hb">v1 · {n_cats} operator categories</span></h2>
+  <h2><span class="hb">{version} · {n_cats} operator categories</span></h2>
   <p>{n_ops} operators, grouped by what you want to change. Syntax keywords and variables are listed separately. The machine profile includes every operator.</p>
   <table><thead><tr><th scope="col">Category</th><th scope="col">Ops</th><th scope="col">Use</th></tr></thead><tbody>{overview}</tbody></table>
 </div>
@@ -389,7 +391,7 @@ PAGE = """<title>OType Command Reference</title>
 <main class="sheet">{sections}</main>
 <footer>
   <p>otype — simple yet powerful scripting for the octatrack</p>
-  <p><span class="todo" aria-hidden="true">\u25cc</span> see the operation's status tooltip · v1 runs on the Octatrack MKI; the audio operators are experimental · generated from the operation registry; the examples pass the OType checker</p>
+  <p><span class="todo" aria-hidden="true">\u25cc</span> see the operation's status tooltip · {version} runs on the Octatrack MKI; the audio operators are experimental · generated from the operation registry; the examples pass the OType checker</p>
   <p>syntax directly inspired by <a href="https://monome.org/docs/teletype/">monome teletype</a> · not affiliated with, endorsed or supported by elektron or monome</p>
   <p>elektron and octatrack are trademarks of elektron music machines; monome and teletype belong to monome. the names are used only to say what this works with.</p>
   <p>no elektron firmware, os image, disassembly or code is distributed here.</p>
