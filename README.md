@@ -1,15 +1,18 @@
-<p align="center">
+<p align="left">
   <img src="https://nordseele.github.io/otype-docs/og.png" alt="otype: scripting for the Octatrack" width="600">
 </p>
 
+-----
 
-<p align="center">
+<p align="left">
   <a href="https://nordseele.github.io/otype-docs/learn/"><b>Learn</b></a> ·
   <a href="https://nordseele.github.io/otype-docs/"><b>Command reference</b></a> ·
   <a href="https://nordseele.github.io/otype-docs/cookbook.html"><b>Cookbook</b></a> ·
   <a href="https://nordseele.github.io/otype-docs/roadmap.html"><b>Roadmap</b></a> ·
   <a href="#faq"><b>FAQ</b></a>
 </p>
+
+-----
 
 # OType
 
