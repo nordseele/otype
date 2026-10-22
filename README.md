@@ -2,11 +2,12 @@
   <img src="https://nordseele.github.io/otype-docs/og.png" alt="otype: scripting for the Octatrack" width="600">
 </p>
 
+<h2 align="center"><a href="https://nordseele.github.io/otype-docs/">→ Read the documentation</a></h2>
+
 <p align="center">
   <a href="https://nordseele.github.io/otype-docs/learn/"><b>Learn</b></a> ·
   <a href="https://nordseele.github.io/otype-docs/"><b>Command reference</b></a> ·
   <a href="https://nordseele.github.io/otype-docs/cookbook.html"><b>Cookbook</b></a> ·
-  <a href="docs/syntax.md"><b>Language</b></a> ·
   <a href="https://nordseele.github.io/otype-docs/roadmap.html"><b>Roadmap</b></a> ·
   <a href="#faq"><b>FAQ</b></a>
 </p>
@@ -26,38 +27,9 @@ def four_floor
 
 <sub>A whole script: a menu entry, a YES/NO, then a kick on every beat of the current track.</sub>
 
-A live script runs with the sequencer instead: a drum and bass on the eight tracks, eight Static slots, a 32-bar
-arrangement with a breakdown, random ghosts and accents, and two filters that move on their own.
-
-```ruby
-def dnb
-  var ticks 0
-  var bars 0
-  var reese 64                           # the bass filter, a random walk
-  var rise 0                            # the break filter, opens over the breakdown
-  launch 384
-  in clock 24:                          # every sixteenth
-    ticks add ticks 1
-    a mod sub ticks 1 16                # step in the bar, 0..15
-    if eq a 0:
-      if eq bars 0: tempo 174
-      bars add bars 1
-      reese add reese sub rnd 25 12       # the bass filter drifts each bar
-      if lt reese 30: reese 30
-      if gt reese 120: reese 120
-      trk 7:
-        par.set fx1 2 reese
-    b mod sub bars 1 32                 # bar in the arrangement, 0..31
-    c and gt b 11 lt b 16               # bars 13..16: the breakdown
-    if c:
-      if eq a 0:
-        rise add mul sub b 12 30 10     # 10, 40, 70, 100: the break opens
-        trk 6:
-          par.set fx1 2 rise
-    # ... the breakdown, the groove, the reese and the fills: the whole file is linked below
-```
-
-<sub>The whole script, with its comments: [`modules/otype/examples/DNB.OTY`](modules/otype/examples/DNB.OTY).</sub>
+A live script runs with the sequencer instead: the [drum and bass recipe](https://nordseele.github.io/otype-docs/cookbook.html#14-drum-and-bass-on-eight-tracks)
+plays the eight tracks from eight Static slots, a 32-bar arrangement with a breakdown, random ghosts and accents,
+and two filters that move on their own.
 
 OType is a language and an engine for custom firmware: it runs inside a firmware that integrates it, such as
 [OT1](https://github.com/nordseele/ot1). See [who it is for](#who-it-is-for-today).
@@ -108,161 +80,16 @@ Not in this version yet:
 - trigs sent by another firmware (`in trig t script:`);
 - the audio operators as an optional package, OType audio.
 
-## The syntax
+## Learn the language
 
-OType is inspired by Monome Teletype: one command per line, prefix notation, modifiers before `:`, blocks by
-indentation. There is little else to learn. A function declares where it appears in a menu and which parameters the
-player can set before it runs:
+The documentation teaches OType from the beginning. **[Learn](https://nordseele.github.io/otype-docs/learn/)** is a series of short studies, each
+building something you can hear: a quickstart, then expressions, decisions and loops, variables, tracks and steps,
+functions, the player's settings, randomness, live scripts and errors. Every listing passes the checker, with the
+simulator's output under it.
 
-```ruby
-DEF BOOMBAP
-  MENU "DRUMS" >> "BOOM BAP"
-  PARAM DENS 40 0 100
-  KICK | 1 "AUDIO/DRUMS/KICKS"
-  HATS | 3 "AUDIO/DRUMS/HIHATS" DENS
-
-DEF HATS | TRACK FOLDER DENS
-  TRK TRACK:
-    PLAY_ONE | FOLDER
-    TR.CLR
-    L 1 16: IF ER 5 16 I: TR.ADD I
-    PROB DENS: TR.ADD 12
-    STEPS HAS.TRIG:
-      EACH:
-        PL.SET I AMP.VOL DR.V 0 I
-```
-
-(`KICK` and `PLAY_ONE` are in `modules/otype/examples/`.)
-
-The essentials, in short. To learn the language step by step, read the [studies](https://nordseele.github.io/otype-docs/learn/); the full rules are in the [language reference](docs/syntax.md).
-
-- **Functions call functions.** `def name | a b` takes up to four arguments; call it with `name | 1 2`. A function
-  without `menu` is a *brick*: it is not listed, the others use it. Functions and `const` are global across all the
-  files of `/SCRIPTS/`. Calls may nest eight deep, never in a loop (no recursion).
-- **Return a value** with `ret`: `a pick_slot | 3` stores what `pick_slot` returns.
-- **Variables**: `a b c d` are local to one run of a function; `x y z t` are global and kept from one press to the
-  next. `i` is the step or the loop index.
-- **Context**: `trk 1 2:` acts on tracks 1 and 2, `steps has.trig:` on the steps that hold a trig; a block follows the
-  indentation.
-- **Every run ends**: loops are bounded, and the checker prints each function's worst-case cost before you copy it.
-
-## A few more scripts
-
-Each of these is a whole script: save it as a `.OTY` file in `/SCRIPTS/`. A function with `menu` appears in your
-firmware's script menu; a live script starts when your firmware launches it.
-
-### Pads from a MIDI controller
-
-A controller on channel 1 plays tracks 1..8 from notes 60..67, at the note's velocity.
-
-```ruby
-def pad_play
-  in note 1:
-    a sub note.num 59
-    if and gt a 0 lt a 9:
-      trk a:
-        trk.level note.vel
-        play a
-```
-
-### A take from a trig
-
-Arm a one-bar capture from MAIN each time the first step of track 1 plays.
-
-```ruby
-def grab
-  in trig 1 all:
-    if and eq trig.hit 1 eq trig.step 1:
-      rec.src 1 3 9
-      rec.len 1 16
-      rec.arm 1 4
-```
-
-### A Euclidean rhythm
-
-A Euclidean rhythm on the current track; the player picks the number of hits before it runs.
-
-```ruby
-def euclid
-  menu "TRIGS" >> "EUCLID"
-  param hits 5 1 16
-  trk cur:
-    tr.clr
-    l 1 16: if er hits 16 i: tr.add i
-```
-
-### Sample roulette
-
-Sample roulette: every trig of the track gets a random sample lock taken from a range of slots.
-
-```ruby
-def kit_roulette
-  menu "LOCKS" >> "ROULETTE"
-  param first 1 1 128
-  param last 8 1 128
-  trk cur:
-    smp.rnd first last
-```
-
-### Scenes for the crossfader
-
-Fill scenes 2 to 16 with random settings of the first FX1 and FX2 parameters, ready for the crossfader.
-
-```ruby
-def scene_sweep
-  menu "SCENES" >> "FX SWEEP"
-  trk cur:
-    l 2 16:
-      scn.set i fx1 1 rnd 128
-      scn.set i fx2 1 rnd 128
-```
-
-### Keep the take
-
-Keep the take you just recorded: save it as a WAV and load it into the first free Flex slot. `input sample` makes
-the function appear where a take is available.
-
-```ruby
-def keep_take
-  menu "AUDIO" >> "KEEP TAKE"
-  input sample
-  src.save
-  a flex.firstfree
-  if nz a:
-    flex.load a file.at 1
-    msg "TAKE IN FLEX" a
-```
-
-### A sliced chain from a folder
-
-Turn a folder of one-shots into a single sliced chain, loaded and ready to play.
-
-```ruby
-def chain_folder
-  menu "AUDIO" >> "CHAIN"
-  param src folder "AUDIO"
-  dir src
-  ext wav
-  cat.clr
-  l 1 16:
-    if gt i file.len: break
-    cat.add file.at i
-  if nz file.len:
-    cat.save "CHAIN"
-    flex.load 1 file.at 1
-```
-
-### A commented beat
-
-A dry kick found on the card by its name, Euclidean clicks between the quarter notes, and a sample-and-hold on the
-filter. Everything after `#` is a comment. The script is in
-[`modules/otype/sketches/NOTO.OTY`](modules/otype/sketches/NOTO.OTY).
-
-<p align="center">
-  <img src="docs/img/vscode-noto.png" alt="A commented OType script in VS Code" width="620">
-</p>
-
-Functions that change the project (`tr.clr`, `src.save`, `cat.save`…) ask YES/NO before they run.
+- **[Cookbook](https://nordseele.github.io/otype-docs/cookbook.html)**: more than thirty recipes, one need each, every one of them tested.
+- **[Command reference](https://nordseele.github.io/otype-docs/)**: every operation, its arguments and an example.
+- **[Language reference](docs/syntax.md)**: every rule in full, for those who implement or integrate OType.
 
 ## Writing scripts
 
@@ -274,7 +101,7 @@ port for a keyboard. Scripts are written on a computer and copied to the card; t
 - **A checker and a simulator** on the computer run a function on a real bank file from your card and show you the
   resulting steps before anything touches the unit.
 - **An error only refuses its own function**: everything else in the file still loads, exactly as on the unit.
-- The **[cookbook](docs/cookbook.md)** gives short recipes, one need each, every one of them tested.
+- The **[cookbook](https://nordseele.github.io/otype-docs/cookbook.html)** gives short recipes, one need each, every one of them tested.
 
 <p align="center">
   <img src="docs/img/vscode-script.png" alt="A three-track beat written in OType, in VS Code" width="620">
@@ -323,8 +150,6 @@ OType ships no interface, so each firmware decides where scripts appear. Here is
 
 Proposing or adding an operator: [workflow and naming rules](docs/adding-an-operator.md).
 
-Roadmap: <https://nordseele.github.io/otype-docs/roadmap.html>.
-
 ## Check your scripts on the computer
 
 Python 3, standard library only.
@@ -340,9 +165,6 @@ python3 tools/otype.py run FUNC FILES --bank bank01.work --pattern 1 --card CARD
 python3 tools/otype.py dump modules/otype/examples/*.OTY --func walk     # the compiled table (OTB), instruction by instruction
 python3 -m unittest tools/test_otype_run.py tools/test_otype_otb.py      # simulator and compiler tests
 ```
-
-Parameters can be typed (`docs/syntax.md` §4): `param keep bool 1` (YES/NO), `param rate option 1 "1/4" "1/2" "1"`
-(a choice of labels), `param src folder "AUDIO"` (a folder picked on the card, read by `dir src deep`).
 
 Errors are reported as `FILE:LINE: FUNCTION: error: message`.
 
@@ -459,10 +281,10 @@ it. Installing a custom firmware remains your decision and your responsibility: 
 
 | | |
 |---|---|
-| `docs/cheatsheet.html` | **command reference**, Teletype cheat-sheet style, generated by `python3 tools/cheatsheet.py` from the registry and the checked examples of `TUTORIAL.OTY` |
-| `docs/learn/` | **the studies** (Learn): one chapter per file; every listing is checked and run when the pages are built |
-| `tools/site.py` · `tools/site.css` | **the website**: `python3 tools/site.py ../otype-docs` builds the reference, Learn and the cookbook; `site.css` is the one stylesheet of every page; `tools/publish_site.sh "message"` rebuilds, checks, commits and pushes it |
-| `docs/cookbook.md` | **recipes**: one need each, checked by `tools/test_otype_run.py`; and integrating the engine into a firmware |
+| `docs/learn/` | **Learn**, the studies: one chapter per file; every listing is checked and run when the pages are built |
+| `docs/cookbook.md` | **the cookbook**: one need each, checked by `tools/test_otype_run.py`; and integrating the engine into a firmware |
+| `docs/cheatsheet.html` | **the command reference**, generated by `python3 tools/cheatsheet.py` from the registry and the checked examples of `TUTORIAL.OTY` |
+| `tools/site.py` · `tools/site.css` | **the website** ([nordseele.github.io/otype-docs](https://nordseele.github.io/otype-docs/)): `python3 tools/site.py ../otype-docs [--watch]` builds it; `site.css` is its one stylesheet; `tools/publish_site.sh "message"` rebuilds, checks, commits and pushes |
 | `docs/audio-imports-contract.md` | **the audio imports** a firmware provides for the audio operators (C signatures, errors, limits) |
 | `docs/adding-an-operator.md` | **contributing an operator**: naming, device behavior, implementation and validation; linked issue template |
 | `firmware/` | **the engine** as firmware sources: compiler, VM, card access, build, link, integration contract (`firmware/README.md`) |

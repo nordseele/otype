@@ -26,9 +26,12 @@ MARKS = {
     "tables to write": "tables to write: the data tables are not written yet",
 }
 
-EXAMPLE_LINE = """l 1 16: prob 35: tr.add i        # for i = 1..16, 35 % chance: a trig on step i
-pl.set i amp.vol rrand 70 127    # = pl.set (i) (amp.vol) (rrand 70 127)
-steps has.trig:                  # block: the steps that have a trig
+EXAMPLE_LINE = """# for i = 1..16, 35 % chance: a trig on step i
+l 1 16: prob 35: tr.add i
+# = pl.set (i) (amp.vol) (rrand 70 127)
+pl.set i amp.vol rrand 70 127
+# a block: the steps that have a trig
+steps has.trig:
   each: cond.set i 50%"""
 TUTORIAL = os.path.join(ROOT, "modules", "otype", "examples", "TUTORIAL.OTY")
 

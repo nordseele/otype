@@ -40,6 +40,7 @@
   --hl-com: #007a4d;    /* comments */
   --code-pad: 12px 16px;      /* padding of a code block (top/bottom, left/right) */
   --code-pad-inline: 1px 5px; /* padding of code inside a sentence */
+  --code-radius: 2px;   /* corners of a code block */
   --fw-body: 300;       /* weights of IBM Plex Mono (100 thin … 700 bold): text of the reference page, buttons */
   --fw-text: 400;       /* text of Learn and the cookbook, sub-headings, table heads */
   --fw-code: 400;       /* all code, blocks and inline: one weight */
@@ -67,13 +68,13 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #0d0d0d; --text: #cfcfcf; --strong: #ffffff; --muted: #8c8c8c; --faint: #4d4d4d; --rule: #3a3a3a;
-    --code-bg: #1a2028; --code-fg: #e4e4e4; --hl-kw: #00aced; --hl-num: #e3bf3b; --hl-com: #00d181;
+    --code-bg: rgb(26 32 40 / 0.34); --code-fg: #e4e4e4; --hl-kw: #00aced; --hl-num: #e3bf3b; --hl-com: #00d181;
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
   --bg: #0d0d0d; --text: #cfcfcf; --strong: #ffffff; --muted: #8c8c8c; --faint: #4d4d4d; --rule: #3a3a3a;
-  --code-bg: #1a2028; --code-fg: #e4e4e4; --hl-kw: #00aced; --hl-num: #e3bf3b; --hl-com: #00d181;
+  --code-bg: rgb(26 32 40 / 0.34); --code-fg: #e4e4e4; --hl-kw: #00aced; --hl-num: #e3bf3b; --hl-com: #00d181;
   color-scheme: dark;
 }
 
@@ -149,11 +150,12 @@ h3 { margin: 22px 0 8px; font-size: var(--fs-small); font-weight: var(--fw-text)
 .letters span { color: var(--muted); }
 
 /* ---- examples ---- */
-.examples { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 40px 56px; margin: 56px 0 64px; }
-.ex { margin: 0; min-width: 0; padding-top: 12px; border-top: 1px solid var(--faint); }
+/* columns, not a grid: examples of different heights stack without gaps */
+.examples { columns: 3 340px; column-gap: 56px; margin: 56px 0 64px; }
+.ex { margin: 0 0 40px; min-width: 0; padding-top: 12px; border-top: 1px solid var(--faint); break-inside: avoid; }
 .ex figcaption { font-size: var(--fs-small); letter-spacing: var(--track); text-transform: uppercase; color: var(--muted); margin-bottom: 12px; }
 pre { margin: 0; overflow-x: auto; font: var(--fw-code) var(--fs-code)/1.7 var(--font); color: var(--text); }
-.ex pre, .howto pre { background: var(--code-bg); color: var(--code-fg); padding: var(--code-pad); }
+.ex pre, .howto pre { background: var(--code-bg); color: var(--code-fg); padding: var(--code-pad); border-radius: var(--code-radius); }
 .howto p code { background: var(--code-bg); color: var(--code-fg); padding: var(--code-pad-inline); }
 
 /* ---- reference sheet ---- */
@@ -192,7 +194,7 @@ footer a { color: inherit; text-decoration: underline; text-underline-offset: 3p
 }
 
 /* ---- learn and cookbook pages ---- */
-.listing > pre { background: var(--code-bg); color: var(--code-fg); padding: var(--code-pad); }
+.listing > pre { background: var(--code-bg); color: var(--code-fg); padding: var(--code-pad); border-radius: var(--code-radius); }
 article p code, article li code, article td code, article dt code { background: var(--code-bg); color: var(--code-fg); padding: var(--code-pad-inline); }
 .learn { display: grid; grid-template-columns: 15rem minmax(0, 1fr); gap: 32px 64px; margin-top: 36px; align-items: start; }
 .toc { position: sticky; top: 16px; font-size: 13px; }
@@ -234,7 +236,7 @@ article th { font-weight: var(--fw-text); }
 .out pre { padding: 8px 16px 12px; }
 .out summary b { color: var(--strong); font-weight: var(--fw-strong); text-transform: uppercase; }
 .out pre { color: var(--text); }
-pre.sh, pre.plain { margin: 12px 0 18px; padding: 10px 12px; border: 1px solid var(--rule); }
+pre.sh, pre.plain { margin: 12px 0 18px; padding: 10px 12px; border: 1px solid var(--rule); border-radius: var(--code-radius); }
 pre.sh code::before { content: "$ "; color: var(--faint); }
 .recap, .try { margin: 40px 0 0; }
 .recap dl { display: grid; grid-template-columns: minmax(8em, max-content) 1fr; gap: 0; margin: 0; font-size: 13px; }
@@ -283,9 +285,12 @@ article h1 + p { font-style: italic; font-size: var(--lead-size); line-height: 1
   <div class="howto">
     <h2><span class="hb">Reading a line</span></h2>
     <p>One command per line, in prefix notation: an operation takes the values that follow it, which may be operations themselves. Modifiers before <code>:</code> repeat or condition the rest of the line; a line ending with <code>:</code> opens an indented block.</p>
-<pre><code><span class="c-kw">l</span> <span class="c-num">1</span> <span class="c-num">16</span>: <span class="c-kw">prob</span> <span class="c-num">35</span>: <span class="c-api">tr.add</span> <span class="c-var">i</span>        <span class="c-com"># for i = 1..16, 35 % chance: a trig on step i</span>
-<span class="c-api">pl.set</span> <span class="c-var">i</span> <span class="c-api">amp.vol</span> <span class="c-api">rrand</span> <span class="c-num">70</span> <span class="c-num">127</span>    <span class="c-com"># = pl.set (i) (amp.vol) (rrand 70 127)</span>
-<span class="c-kw">steps</span> <span class="c-api">has.trig</span>:                  <span class="c-com"># block: the steps that have a trig</span>
+<pre><code><span class="c-com"># for i = 1..16, 35 % chance: a trig on step i</span>
+<span class="c-kw">l</span> <span class="c-num">1</span> <span class="c-num">16</span>: <span class="c-kw">prob</span> <span class="c-num">35</span>: <span class="c-api">tr.add</span> <span class="c-var">i</span>
+<span class="c-com"># = pl.set (i) (amp.vol) (rrand 70 127)</span>
+<span class="c-api">pl.set</span> <span class="c-var">i</span> <span class="c-api">amp.vol</span> <span class="c-api">rrand</span> <span class="c-num">70</span> <span class="c-num">127</span>
+<span class="c-com"># a block: the steps that have a trig</span>
+<span class="c-kw">steps</span> <span class="c-api">has.trig</span>:
   <span class="c-kw">each</span>: <span class="c-api">cond.set</span> <span class="c-var">i</span> <span class="c-cond">50%</span></code></pre>
     <p>Dotted names (<code><span class="c-api">tr.add</span></code>) are the OT's API; your own functions use underscores and take their arguments after <code><span class="c-op">|</span></code>. OType ignores case; this reference writes everything in lowercase. Text between quotes keeps its case.</p>
     <p>Read a setting with <code><span class="c-var">x</span> <span class="c-api">tempo</span></code>; write it with <code><span class="c-api">tempo</span> <span class="c-num">137</span></code>. Numbered settings keep their number: <code><span class="c-var">x</span> <span class="c-api">lfo.wave</span> <span class="c-num">1</span></code> / <code><span class="c-api">lfo.wave</span> <span class="c-num">1</span> <span class="c-num">18</span></code>. Renamed operators have no compatibility aliases.</p>
