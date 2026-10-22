@@ -1609,6 +1609,21 @@ class TestDocsAndEditor(unittest.TestCase):
             quick = open(os.path.join(d, "quickstart.html"), encoding="utf-8").read()
             self.assertIn("X...X...X...X...", quick)     # four_floor's run is printed under its listing
 
+    def test_site_builds_with_one_stylesheet(self):
+        import importlib.util                      # tools/site.py, by path: `import site` is the stdlib's
+        spec = importlib.util.spec_from_file_location("otype_site", os.path.join(ROOT, "tools", "site.py"))
+        site = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(site)
+        with tempfile.TemporaryDirectory() as d:
+            site.build(d)
+            book = open(os.path.join(d, "cookbook.html"), encoding="utf-8").read()
+            for a in set(re.findall(r'href="#([^"]+)"', book)):    # the cookbook's own links land on a heading
+                self.assertIn('id="%s"' % a, book, a)
+            for page in ("index.html", "cookbook.html", os.path.join("learn", "quickstart.html")):
+                text = open(os.path.join(d, page), encoding="utf-8").read()
+                self.assertIn('style.css">', text, page)
+                self.assertNotIn("<style>", text, page)
+
     def test_cheatsheet_places_every_keyword_and_operation(self):
         import cheatsheet                          # tools/cheatsheet.py: refuses to build when an entry has no section
         page = cheatsheet.build(False)

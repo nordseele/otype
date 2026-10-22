@@ -101,64 +101,6 @@ def render_body(chapter_no, slug, body):
     return PRE.sub(sub, cs.highlight_inline(body))
 
 
-LEARN_CSS = """
-.listing > pre { background: var(--code-bg); color: var(--code-fg); padding: 12px 16px; }
-article p code, article li code, article td code, article dt code { background: var(--code-bg); color: var(--code-fg); padding: 1px 5px; }
-.learn { display: grid; grid-template-columns: 15rem minmax(0, 1fr); gap: 32px 64px; margin-top: 36px; align-items: start; }
-.toc { position: sticky; top: 16px; font-size: 13px; }
-.toc summary { font-size: var(--fs-small); letter-spacing: var(--track); text-transform: uppercase; color: var(--muted); cursor: pointer; margin-bottom: 10px; }
-.toc ol { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule); }
-.toc li { border-bottom: 1px solid var(--rule); }
-.toc a { display: grid; grid-template-columns: 2.2em 1fr; padding: 6px 4px; text-decoration: none; }
-.toc a span { color: var(--faint); }
-.toc a[aria-current] { background: var(--strong); color: var(--bg); font-weight: 600; }
-.toc a[aria-current] span { color: var(--bg); }
-article { min-width: 0; max-width: 76ch; font-weight: 400; }
-article h1 { font-size: 24px; line-height: 1.3; font-weight: 700; color: var(--strong); margin: 0 0 6px; }
-article .kicker { font-weight: 500; font-size: var(--fs-small); letter-spacing: var(--track); text-transform: uppercase; color: var(--muted); margin: 0 0 18px; }
-article h2 { display: block; margin: 48px 0 14px; padding-bottom: 6px; border-bottom: 1px solid var(--rule);
-  font-size: 18px; line-height: 1.35; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--strong); }
-article h2::after { content: none; }
-article h2 code { font-weight: 600; background: none; border: 0; padding: 0; color: inherit; }
-article p, article li { max-width: 72ch; }
-article p { margin: 0 0 14px; }
-article ul, article ol { padding-left: 1.3em; margin: 0 0 16px; }
-article li { margin-bottom: 6px; }
-article code { font-weight: 400; color: var(--code-fg); }
-article pre code { font-weight: 400; color: inherit; }
-article table { width: 100%; border-collapse: collapse; font-size: var(--fs-code); margin: 6px 0 20px; }
-article th, article td { text-align: left; vertical-align: top; padding: 6px 12px 6px 0; border-bottom: 1px solid var(--rule); }
-article thead { color: var(--muted); }
-article th { font-weight: 400; }
-.listing { margin: 20px 0 26px; }
-.listing figcaption { font-style: italic; font-size: var(--fs-small); letter-spacing: var(--track); text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
-.listing figcaption b { color: var(--strong); font-weight: 600; font-style: normal; }
-.out { border: 1px solid var(--rule); margin-top: 12px; }
-.out summary { cursor: pointer; padding: 6px 16px; font-size: var(--fs-small); letter-spacing: var(--track); color: var(--muted); }
-.out summary:hover { color: var(--strong); }
-.out[open] summary { border-bottom: 1px dashed var(--rule); }
-.out pre { padding: 8px 16px 12px; }
-.out summary b { color: var(--strong); font-weight: 600; text-transform: uppercase; }
-.out pre { color: var(--text); }
-pre.sh, pre.plain { margin: 12px 0 18px; padding: 10px 12px; border: 1px solid var(--rule); }
-pre.sh code::before { content: "$ "; color: var(--faint); }
-.recap, .try { margin: 40px 0 0; }
-.recap dl { display: grid; grid-template-columns: minmax(8em, max-content) 1fr; gap: 0; margin: 0; font-size: 13px; }
-.recap dt, .recap dd { margin: 0; padding: 6px 12px 6px 0; border-bottom: 1px solid var(--rule); }
-.recap dd { color: var(--muted); font-style: italic; font-weight: 300; }
-.try li { color: var(--text); }
-.pager { display: flex; justify-content: space-between; gap: 16px; margin: 56px 0 0; padding-top: 16px; border-top: 1px solid var(--rule); font-size: 13px; }
-.pager a { text-decoration: none; padding: 6px 10px; border: 1px solid var(--rule); }
-.pager small { display: block; font-size: var(--fs-small); color: var(--muted); letter-spacing: var(--track); text-transform: uppercase; }
-.pager a:hover small { color: var(--bg); }
-.pager .next { margin-left: auto; text-align: right; }
-.next-step { margin-top: 32px; }
-@media (max-width: 860px) {
-  .learn { grid-template-columns: minmax(0, 1fr); }
-  .toc { position: static; }
-}
-"""
-
 PAGE = """<!doctype html>
 <html lang="en">
 <head>
@@ -170,37 +112,32 @@ PAGE = """<!doctype html>
 <meta property="og:site_name" content="otype">
 <meta property="og:title" content="{full_title}">
 <meta property="og:description" content="{desc}">
-<meta property="og:url" content="https://nordseele.github.io/otype-docs/learn/{href}">
+<meta property="og:url" content="https://nordseele.github.io/otype-docs/{url}">
 <meta property="og:image" content="https://nordseele.github.io/otype-docs/og.png">
 <meta name="twitter:card" content="summary_large_image">
 <title>{full_title}</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500&display=swap">
-<style>{css}</style>
+<link rel="stylesheet" href="{up}style.css">
 </head>
 <body>
 <div class="wrap">
-<div class="bar"><span class="cell first">OTYPE</span><span class="cell">learn</span><span class="cell">{version}</span><span class="cell end">octatrack</span><button id="theme" class="cell" type="button">dark</button></div>
+<div class="bar"><span class="cell first">OTYPE</span><span class="cell">{section}</span><span class="cell">{version}</span><span class="cell steps" aria-hidden="true">{steps}</span><span class="cell tag">scripting for the octatrack</span><span class="cell end">octatrack</span><button id="theme" class="cell" type="button">dark</button></div>
 <header class="top">
-  <h1 aria-label="otype"><a href="../" style="background:none">{wordmark}</a></h1>
-  <p class="tag">scripting for the octatrack</p>
+  <h1 aria-label="otype"><a href="{up}./" style="background:none">{wordmark}</a></h1>
   {nav}
-  <div class="steps" aria-hidden="true">{steps}</div>
 </header>
 <div class="learn">
-<details class="toc" open><summary>The studies</summary><ol>{toc}</ol></details>
+<details class="toc" open><summary>{toc_title}</summary><ol>{toc}</ol></details>
 <article>
 <p class="kicker">{kicker}</p>
 {body}
-<nav class="pager" aria-label="Chapters">{pager}</nav>
+<nav class="pager" aria-label="Pages">{pager}</nav>
 </article>
 </div>
 <footer>
-  <p>otype — scripting for the octatrack · every listing on this page passes the OType checker, and the outputs are printed by its simulator</p>
+  <p>otype — scripting for the octatrack · {checked}</p>
   <p>syntax directly inspired by <a href="https://monome.org/docs/teletype/">monome teletype</a> · not affiliated with, endorsed or supported by elektron or monome</p>
   <p>elektron and octatrack are trademarks of elektron music machines; monome and teletype belong to monome. the names are used only to say what this works with.</p>
-  <p><a href="../">command reference</a> · <a href="https://github.com/nordseele/otype">otype on github</a> · <a href="https://www.gnu.org/licenses/gpl-3.0.html">gpl-3.0</a> · © nordseele 2026</p>
+  <p><a href="{up}./">command reference</a> · <a href="https://github.com/nordseele/otype">otype on github</a> · <a href="https://www.gnu.org/licenses/gpl-3.0.html">gpl-3.0</a> · © nordseele 2026</p>
 </footer>
 </div>
 <script>{js}
@@ -213,7 +150,6 @@ if (matchMedia('(max-width: 860px)').matches) document.querySelector('.toc').rem
 def build(out_dir):
     cs.OPNAMES = {o["name"].upper() for o in cs.otype.ops_json() if o["category"] not in ("KEYWORD", "VARIABLE")}
     chs = chapters()
-    css = open(cs.CSS_FILE, encoding="utf-8").read() + LEARN_CSS
     os.makedirs(out_dir, exist_ok=True)
     written = []
     for k, (slug, title, body) in enumerate(chs):
@@ -232,7 +168,8 @@ def build(out_dir):
         first_p = re.search(r"<p>(.*?)</p>", body, re.S).group(1)
         desc = html.escape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", html.unescape(first_p))).strip()[:200], quote=True)
         page = PAGE.format(
-            title=re.sub(r"<[^>]+>", "", title), full_title=title if slug == "index" else title + " · Learn OType", desc=desc, href=href, css=css, version=cs.VERSION,
+            title=re.sub(r"<[^>]+>", "", title), full_title=title if slug == "index" else title + " · Learn OType", desc=desc, url="learn/" + href, up="../", section="learn", toc_title="The studies", version=cs.VERSION,
+            checked="every listing on this page passes the OType checker, and the outputs are printed by its simulator",
             wordmark=cs.wordmark_svg(cs.WORDMARK), nav=cs.site_nav("learn", "../"), steps=cs.STEPS, toc=toc,
             kicker="learn OType" if slug == "index" else "appendix" if slug == "scope" else f"study {k:02d} of {len(chs) - 2}",
             body=render_body(k, slug, body), pager=pager, js=cs.SHARED_JS)

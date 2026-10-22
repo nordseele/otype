@@ -206,7 +206,7 @@ def entry_html(o):
 
 
 SITE = (("learn", "learn/"), ("reference", "./"), ("roadmap", "roadmap.html"),
-        ("cookbook", "https://github.com/nordseele/otype/blob/main/docs/cookbook.md"),
+        ("cookbook", "cookbook.html"),
         ("github", "https://github.com/nordseele/otype"))
 
 
@@ -220,7 +220,8 @@ def site_nav(current, up=""):
     return '<nav class="site" aria-label="Site">' + "".join(links) + "</nav>"
 
 
-def build(fragment):
+def build(fragment, css_href=None):
+    """css_href: link the site's stylesheet instead of inlining it (the published site)."""
     ops = otype.ops_json()
     global OPNAMES
     OPNAMES = {o["name"].upper() for o in ops if o["category"] not in ("KEYWORD", "VARIABLE")}
@@ -274,7 +275,9 @@ def build(fragment):
         overview.append(f'<tr><th scope="row"><a href="#{sid}">{html.escape(title)}</a></th>'
                         f'<td>{len(by_cat[cat])}</td><td>{html.escape(CATEGORY_SUMMARIES[cat])}</td></tr>')
 
-    body = PAGE.format(css=open(CSS_FILE, encoding="utf-8").read(), js=JS, wordmark=wordmark_svg(WORDMARK), steps=STEPS, n_ops=n_ops, version=VERSION, example_line=highlight(EXAMPLE_LINE), letters=letters, examples=examples, site_nav=site_nav("reference"),
+    css = (f'<link rel="stylesheet" href="{css_href}">' if css_href
+           else "<style>" + open(CSS_FILE, encoding="utf-8").read() + "</style>")
+    body = PAGE.format(css=css, js=JS, wordmark=wordmark_svg(WORDMARK), steps=STEPS, n_ops=n_ops, version=VERSION, example_line=highlight(EXAMPLE_LINE), letters=letters, examples=examples, site_nav=site_nav("reference"),
                        sections="".join(sections), nav=nav, overview="".join(overview), n_cats=len(overview))
     body = highlight_inline(body)
     if fragment:
@@ -288,7 +291,7 @@ def build(fragment):
 
 OG_META = '<meta name="description" content="Every command of OType, scripting for the Octatrack: what it does, its arguments, examples.">\n<meta name="theme-color" content="#1a1a1a">\n<meta property="og:type" content="website">\n<meta property="og:site_name" content="otype">\n<meta property="og:title" content="OType Command Reference">\n<meta property="og:description" content="Every command of OType, scripting for the Octatrack: what it does, its arguments, examples.">\n<meta property="og:url" content="https://nordseele.github.io/otype-docs/">\n<meta property="og:image" content="https://nordseele.github.io/otype-docs/og.png">\n<meta property="og:image:width" content="1200">\n<meta property="og:image:height" content="630">\n<meta property="og:image:alt" content="otype: scripting for the Octatrack">\n<meta name="twitter:card" content="summary_large_image">\n'   # link preview (tools/og_image.py -> otype-docs/og.png)
 
-CSS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cheatsheet.css")
+CSS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "site.css")
 
 WORDMARK = """       █
 ▄▀▀▀▄ ▀█▀▀  █   █ █▀▀▀▄ ▄▀▀▀▄
@@ -340,9 +343,8 @@ SHARED_JS = r"""
   btn.addEventListener('click', function () {
     var t = current() === 'dark' ? 'light' : 'dark'; root.setAttribute('data-theme', t); label();
     try { localStorage.setItem('otype-theme', t); } catch (e) {}
-  });
-  var steps = Array.prototype.slice.call(document.querySelectorAll('.steps i')), at = 0;
-  var tempo = parseFloat(getComputedStyle(root).getPropertyValue('--tempo')) * 1000 || 500;
+  });  var steps = Array.prototype.slice.call(document.querySelectorAll('.steps i')), at = 0;
+  var tempo = parseFloat(getComputedStyle(root).getPropertyValue('--tempo')) * 1000 || 150;
   if (steps.length && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     setInterval(function () { steps[at].classList.remove('on'); at = (at + 1) % steps.length; steps[at].classList.add('on'); }, tempo);
   }
@@ -382,17 +384,12 @@ JS = SHARED_JS + r"""
 """
 
 PAGE = """<title>OType Command Reference</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500&display=swap">
-<style>{css}</style>
+{css}
 <div class="wrap">
-<div class="bar"><span class="cell first">OTYPE</span><span class="cell">{version}</span><span class="cell">{n_ops} ops</span><span class="cell end">octatrack</span><button id="theme" class="cell" type="button">dark</button></div>
+<div class="bar"><span class="cell first">OTYPE</span><span class="cell">{version}</span><span class="cell steps" aria-hidden="true">{steps}</span><span class="cell">{n_ops} ops</span><span class="cell tag">scripting for the octatrack</span><span class="cell end">octatrack</span><button id="theme" class="cell" type="button">dark</button></div>
 <header class="top">
   <h1 aria-label="otype">{wordmark}</h1>
-  <p class="tag">scripting for the octatrack</p>
   {site_nav}
-  <div class="steps" aria-hidden="true">{steps}</div>
 </header>
 <div class="overview">
   <h2><span class="hb">{version} · {n_cats} operator categories</span></h2>

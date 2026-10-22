@@ -16,37 +16,53 @@
 <meta property="og:image:alt" content="otype: scripting for the Octatrack">
 <meta name="twitter:card" content="summary_large_image">
 <title>OType Command Reference</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500&display=swap">
-<style>/* OType command reference — monochrome "OT screen" look. Inlined into the page by tools/cheatsheet.py.
-   Retune the look by editing ONLY the token blocks below (light, dark x2: the dark values appear twice,
+<style>/* The one stylesheet of the OType site (reference, learn, cookbook, roadmap).
+   Edit it here, then rebuild the site: python3 tools/site.py ../otype-docs
+   Colours and the font: the token blocks below (light, dark x2: the dark values appear twice,
    once for "system is dark" and once for the toggle — keep the two identical). */
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;1,100;1,200;1,300;1,400;1,500;1,600;1,700&family=IBM+Plex+Sans+Condensed:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;1,100;1,200;1,300;1,400;1,500;1,600;1,700&family=IBM+Plex+Sans:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;1,100;1,200;1,300;1,400;1,500;1,600;1,700&display=swap");   /* IBM Plex Mono, Sans and Sans Condensed, every weight and italic */
 :root {
   --bg: #f4f4f2;        /* page background (and text inside inverted boxes) */
-  --text: #1a1a1a;      /* body text */
-  --strong: #000000;    /* strong ink: headings, keywords, numbers, inverted-box fill */
+  --text: #1c1c1f;      /* body text */
+  --strong: #1a222e;    /* strong ink: headings, keywords, numbers, inverted-box fill */
   --muted: #6b6b6b;     /* secondary text: docs, strings, aliases */
   --faint: #b0b0b0;     /* comments, step borders, heading and table rules */
   --rule: #d0d0cc;      /* frames, separators between commands */
-  --font: "IBM Plex Mono", ui-monospace, Menlo, monospace;  /* the one font everywhere */
+  --font: "IBM Plex Mono", ui-monospace, Menlo, monospace;  /* code, headings, labels, navigation */
+  --font-text: "IBM Plex Sans", system-ui, sans-serif;     /* running text; var(--font) to go back to mono */
+  --font-label: "IBM Plex Sans Condensed", var(--font-text);  /* labels: top bar, menu, black boxes, small headings; var(--font) for mono */
+  --fs-label: 12px;     /* their size */
+  --font-tag: var(--font-label);  /* the tagline, in the top bar (italic): var(--font) for Plex Mono, var(--font-text) for Plex Sans */
   --code-bg: #eaedf0;   /* every piece of code: blocks and inline */
   --code-fg: #1a1f26;
   --hl-kw: #006f9c;     /* keywords: def menu l if trk steps … */
-  --hl-num: #7d6000;    /* numbers */
+  --hl-num: #987605;    /* numbers */
   --hl-com: #007a4d;    /* comments */
+  --code-pad: 12px 16px;      /* padding of a code block (top/bottom, left/right) */
+  --code-pad-inline: 1px 5px; /* padding of code inside a sentence */
+  --fw-body: 300;       /* weights of IBM Plex Mono (100 thin … 700 bold): text of the reference page, buttons */
+  --fw-text: 400;       /* text of Learn and the cookbook, sub-headings, table heads */
+  --fw-code: 400;       /* all code, blocks and inline: one weight */
+  --fw-light: 300;      /* secondary text: the right column of "What you learned" */
+  --fw-label: 500;      /* a new term in the text (italic) */
+  --fw-ui: 300;         /* labels in Plex Sans Condensed: top bar, menu, "study 03 of 10", sidebar groups, captions */
+  --fw-strong: 600;     /* section headings, bold labels, selected items, black boxes */
+  --fw-title: 700;      /* chapter titles */
+  --fw-box: 500;        /* the black boxes: headings (span.hb) and OTYPE in the top bar */
   --fs-body: 14px;      /* body text size */
+  --fs-text: 15px;      /* running text (Plex Sans) of Learn, the cookbook and the roadmap */
   --fs-code: 13px;      /* code blocks and signatures */
   --fs-small: 11px;     /* status bar, chips, headings, soft keys */
   --px-mark: clamp(6px, 2vw, 11px);  /* size of one pixel of the wordmark */
   --lh-body: 1.6;       /* body line height */
   --gutter: clamp(16px, 4vw, 56px);     /* side margins */
-  --pad-inv: 0 7px;     /* padding of an inverted box */
+  --pad-inv: 2px 7px;     /* padding of an inverted box */
   --pad-cond: 0 3px;    /* padding of a trig-condition box */
   --track: 0.06em;      /* letter-spacing of inverted boxes */
-  --step: 9px;          /* size of one sequencer step */
-  --step-gap: 5px;      /* space between steps */
-  --tempo: 0.5s;        /* playhead: time per step (see the JS, 500 ms) */
+  --step: 6px;          /* one step of the little sequencer in the top bar */
+  --tempo: 0.15s;       /* the playhead: time per step */
+  --fade: 0.7s;         /* how long a step glows after the playhead left it */
+  --lead-size: 17px;    /* the italic opening paragraph of a chapter */
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -64,25 +80,24 @@
 /* ---- base ---- */
 * { box-sizing: border-box; border-radius: 0; box-shadow: none; text-shadow: none; }
 html, body { background: var(--bg); }
-body { margin: 0; color: var(--text); font: 300 var(--fs-body)/var(--lh-body) var(--font); -webkit-text-size-adjust: 100%; }
+body { margin: 0; color: var(--text); font: var(--fw-body) var(--fs-body)/var(--lh-body) var(--font); -webkit-text-size-adjust: 100%; }
 ::selection { background: var(--strong); color: var(--bg); }
 code, pre, input, button { font-family: var(--font); }
-code { font-weight: 300; }
+code { font-weight: var(--fw-code); }
 a { color: inherit; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
 a:hover { background: var(--strong); color: var(--bg); text-decoration: none; }
 :focus-visible { outline: 1px solid var(--strong); outline-offset: 2px; }
 .wrap { max-width: 1440px; margin: 0 auto; padding-inline: var(--gutter); padding-block: 24px 72px; }
 
 /* inverted box: the signature */
-.inv, h2 .hb { background: var(--strong); color: var(--bg); font-weight: 600; padding: var(--pad-inv); letter-spacing: var(--track); }
-
+.inv, h2 .hb { background: var(--strong); color: var(--bg); font-weight: var(--fw-box); padding: var(--pad-inv); letter-spacing: var(--track); }
 /* ---- status bar ---- */
 .bar { display: flex; flex-wrap: wrap; border: 1px solid var(--rule); font-size: var(--fs-small); letter-spacing: var(--track); line-height: 1; }
 .bar .cell { padding: 6px 10px; border-right: 1px solid var(--rule); white-space: nowrap; }
 .bar .cell:last-child { border-right: 0; }
-.bar .cell.first { background: var(--strong); color: var(--bg); font-weight: 600; border-right-color: var(--strong); }
+.bar .cell.first { background: var(--strong); color: var(--bg); font-weight: var(--fw-strong); border-right-color: var(--strong); }
 .bar .end { margin-left: auto; border-left: 1px solid var(--rule); }
-#theme { background: none; color: var(--text); border: 0; border-left: 1px solid var(--rule); font: 300 var(--fs-small)/1 var(--font);
+#theme { background: none; color: var(--text); border: 0; border-left: 1px solid var(--rule); font: var(--fw-body) var(--fs-small)/1 var(--font);
   letter-spacing: var(--track); padding: 6px 10px; cursor: pointer; }
 #theme:hover { background: var(--strong); color: var(--bg); }
 
@@ -90,14 +105,17 @@ a:hover { background: var(--strong); color: var(--bg); text-decoration: none; }
 header.top { margin: 40px 0 0; }
 h1 { margin: 0; font: inherit; }
 h1 .mark { display: block; height: calc(var(--px-mark) * 10); width: auto; color: var(--strong); }
-.tag { margin: 14px 0 18px; color: var(--muted); font-size: var(--fs-body); }
-nav.site { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 22px; font-size: var(--fs-small); letter-spacing: var(--track); text-transform: uppercase; }
+.bar .tag { color: var(--muted); font-family: var(--font-tag); font-style: italic; }
+nav.site { display: flex; flex-wrap: wrap; gap: 6px; margin: 20px 0 22px; font-size: var(--fs-small); letter-spacing: var(--track); text-transform: uppercase; }
 nav.site a { padding: 4px 9px; border: 1px solid var(--rule); text-decoration: none; line-height: 1.3; }
-nav.site a:hover, nav.site a[aria-current] { background: var(--strong); color: var(--bg); border-color: var(--strong); font-weight: 600; }
-.steps { display: flex; gap: var(--step-gap); padding: 3px; flex-wrap: wrap; }
-.steps i { display: block; width: var(--step); height: var(--step); border: 1px solid var(--faint); }
-.steps i.f { background: var(--muted); border-color: var(--muted); }
-.steps i.on { outline: 1px solid var(--strong); outline-offset: 2px; }
+nav.site a:hover, nav.site a[aria-current] { background: var(--strong); color: var(--bg); border-color: var(--strong); }
+/* the little sequencer, in the top bar next to the version */
+.bar .steps { display: flex; align-items: center; gap: 3px; }
+.steps i { display: block; width: var(--step); height: var(--step); background: var(--rule);
+  transition: background-color var(--fade) ease-out; }
+.steps i.f { background: var(--faint); }   /* the beats: one tone darker, no colour */
+/* the playhead lights a step at once, then it fades: a trail */
+.steps i.on { background: var(--strong); transition: none; }
 
 /* ---- tools: filter and soft-key navigation ---- */
 .overview { margin: 36px 0 0; }
@@ -107,18 +125,18 @@ nav.site a:hover, nav.site a[aria-current] { background: var(--strong); color: v
 .overview td:nth-child(2) { white-space: nowrap; }
 .tools { display: flex; flex-wrap: wrap; gap: 14px 24px; align-items: flex-start; margin: 32px 0 0; padding: 12px 0 20px; border-bottom: 1px solid var(--rule);
   position: sticky; top: 0; z-index: 1; background: var(--bg); }  /* search and sections stay at hand while reading */
-#q { font: 300 var(--fs-body) var(--font); padding: 5px 10px; border: 1px solid var(--rule); background: transparent; color: var(--text);
+#q { font: var(--fw-body) var(--fs-body) var(--font); padding: 5px 10px; border: 1px solid var(--rule); background: transparent; color: var(--text);
   width: min(320px, 100%); -webkit-appearance: none; appearance: none; }
 #q::placeholder { color: var(--faint); }
 #q:focus { border-color: var(--strong); outline: 0; }
 nav.jump { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 320px; font-size: var(--fs-small); letter-spacing: var(--track); text-transform: uppercase; }
 nav.jump a { display: block; padding: 4px 9px; border: 1px solid var(--rule); text-decoration: none; line-height: 1.3; }
-nav.jump a:hover, nav.jump a[aria-current] { background: var(--strong); color: var(--bg); border-color: var(--strong); font-weight: 600; }
+nav.jump a:hover, nav.jump a[aria-current] { background: var(--strong); color: var(--bg); border-color: var(--strong); }
 
 /* ---- headings ---- */
-h2 { display: flex; align-items: center; gap: 12px; margin: 0 0 16px; font-size: var(--fs-small); line-height: 1.5; text-transform: uppercase; font-weight: 600; }
+h2 { display: flex; align-items: center; gap: 12px; margin: 0 0 16px; font-size: var(--fs-small); line-height: 1.5; text-transform: uppercase; font-weight: var(--fw-strong); }
 h2::after { content: ""; flex: 1; height: 1px; background: var(--faint); }
-h3 { margin: 22px 0 8px; font-size: var(--fs-small); font-weight: 400; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+h3 { margin: 22px 0 8px; font-size: var(--fs-small); font-weight: var(--fw-text); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
 
 /* ---- intro ---- */
 .intro { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: 40px 64px; margin: 44px 0 0; }
@@ -127,16 +145,16 @@ h3 { margin: 22px 0 8px; font-size: var(--fs-small); font-weight: 400; letter-sp
 .howto pre { margin: 14px 0 18px; }
 .letters { border-bottom: 1px solid var(--faint); }
 .letters div { display: grid; grid-template-columns: 5.5em 1fr; gap: 12px; padding: 5px 0; border-top: 1px solid var(--faint); }
-.letters code { font-weight: 600; color: var(--strong); }
+.letters code { font-weight: var(--fw-strong); color: var(--strong); }
 .letters span { color: var(--muted); }
 
 /* ---- examples ---- */
 .examples { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 40px 56px; margin: 56px 0 64px; }
 .ex { margin: 0; min-width: 0; padding-top: 12px; border-top: 1px solid var(--faint); }
 .ex figcaption { font-size: var(--fs-small); letter-spacing: var(--track); text-transform: uppercase; color: var(--muted); margin-bottom: 12px; }
-pre { margin: 0; overflow-x: auto; font: 400 var(--fs-code)/1.7 var(--font); color: var(--text); }
-.ex pre, .howto pre { background: var(--code-bg); color: var(--code-fg); padding: 12px 16px; }
-.howto p code { background: var(--code-bg); color: var(--code-fg); padding: 1px 5px; }
+pre { margin: 0; overflow-x: auto; font: var(--fw-code) var(--fs-code)/1.7 var(--font); color: var(--text); }
+.ex pre, .howto pre { background: var(--code-bg); color: var(--code-fg); padding: var(--code-pad); }
+.howto p code { background: var(--code-bg); color: var(--code-fg); padding: var(--code-pad-inline); }
 
 /* ---- reference sheet ---- */
 /* one category per band, its operators left to right: no climbing back up a column */
@@ -147,14 +165,14 @@ pre { margin: 0; overflow-x: auto; font: 400 var(--fs-code)/1.7 var(--font); col
 .cat > h2, .cat > h3 { grid-column: 1 / -1; }
 .op { min-width: 0; padding: 8px 0 9px; border-top: 1px solid var(--rule); }
 .sig { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
-.sig code { font: 300 var(--fs-code) var(--font); color: var(--text); overflow-wrap: anywhere; }
-.sig code b { font-weight: 600; color: var(--strong); }
-.todo { font-size: 0.8em; font-weight: 400; color: var(--faint); margin-left: 5px; cursor: help; }
+.sig code { font: var(--fw-code) var(--fs-code) var(--font); color: var(--text); overflow-wrap: anywhere; }
+.sig code b { font-weight: var(--fw-strong); color: var(--strong); }
+.todo { font-size: 0.8em; font-weight: var(--fw-text); color: var(--faint); margin-left: 5px; cursor: help; }
 .alias { font-size: 12px; color: var(--muted); white-space: nowrap; }
 .doc { font-size: 13px; color: var(--muted); line-height: 1.5; margin-top: 3px; }
-.chip { display: inline-block; font: 400 10px/1.4 var(--font); text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted);
+.chip { display: inline-block; font: var(--fw-text) 10px/1.4 var(--font); text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted);
   border: 1px solid var(--faint); padding: 0 5px; margin-left: 4px; }
-.chip.warn { background: var(--strong); color: var(--bg); border-color: var(--strong); font-weight: 600; }
+.chip.warn { background: var(--strong); color: var(--bg); border-color: var(--strong); font-weight: var(--fw-strong); }
 .op.hit { outline: 1px solid var(--strong); outline-offset: 5px; }
 .empty { color: var(--muted); font-style: italic; }
 footer { margin-top: 48px; padding-top: 20px; border-top: 1px solid var(--rule); color: var(--muted); font-size: 12px; }
@@ -172,16 +190,85 @@ footer a { color: inherit; text-decoration: underline; text-underline-offset: 3p
   .bar .cell { padding: 6px 8px; }
   .wrap { padding-block: 16px 56px; }
 }
+
+/* ---- learn and cookbook pages ---- */
+.listing > pre { background: var(--code-bg); color: var(--code-fg); padding: var(--code-pad); }
+article p code, article li code, article td code, article dt code { background: var(--code-bg); color: var(--code-fg); padding: var(--code-pad-inline); }
+.learn { display: grid; grid-template-columns: 15rem minmax(0, 1fr); gap: 32px 64px; margin-top: 36px; align-items: start; }
+.toc { position: sticky; top: 16px; font-size: 13px; }
+.toc summary { font-size: var(--fs-small); letter-spacing: var(--track); text-transform: uppercase; color: var(--muted); cursor: pointer; margin-bottom: 10px; }
+.toc ol { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule); }
+.toc li { border-bottom: 1px solid var(--rule); }
+.toc a { display: grid; grid-template-columns: 2.2em 1fr; padding: 6px 4px; text-decoration: none; }
+.toc a span { color: var(--faint); }
+.toc a[aria-current] { background: var(--strong); color: var(--bg); font-weight: var(--fw-strong); }
+.toc a[aria-current] span { color: var(--bg); }
+article { min-width: 0; max-width: 76ch; font-weight: var(--fw-text); }
+article h1 { font-size: 24px; line-height: 1.3; font-weight: var(--fw-title); color: var(--strong); margin: 0 0 6px; }
+article .kicker { font-weight: var(--fw-label); font-size: var(--fs-small); letter-spacing: var(--track); text-transform: uppercase; color: var(--muted); margin: 0 0 18px; }
+article h2 { display: block; margin: 48px 0 14px; padding-bottom: 6px; border-bottom: 1px solid var(--rule);
+  font-size: 18px; line-height: 1.35; font-weight: var(--fw-strong); letter-spacing: 0; text-transform: none; color: var(--strong); }
+article h2::after { content: none; }
+article h2 code { font-weight: var(--fw-strong); background: none; border: 0; padding: 0; color: inherit; }
+article p, article li { max-width: 72ch; }
+/* running text in Plex Sans, apart from the code (code inside it stays mono: `code` sets its own font) */
+article p:not(.kicker), article li, article td, article dd, .howto p, .overview p, .doc, footer p, .txt p, .txt li { font-family: var(--font-text); }
+article p:not(.kicker), article li, .overview p, .txt p, .txt li { font-size: var(--fs-text); }
+article p code, article li code, .howto p code { font-size: 0.9em; }   /* mono looks bigger than sans at the same size */
+article p { margin: 0 0 14px; }
+article ul, article ol { padding-left: 1.3em; margin: 0 0 16px; }
+article li { margin-bottom: 6px; }
+article code { font-weight: var(--fw-code); color: var(--code-fg); }
+article pre code { font-weight: var(--fw-code); color: inherit; }
+article table { width: 100%; border-collapse: collapse; font-size: var(--fs-code); margin: 6px 0 20px; }
+article th, article td { text-align: left; vertical-align: top; padding: 6px 12px 6px 0; border-bottom: 1px solid var(--rule); }
+article thead { color: var(--muted); }
+article th { font-weight: var(--fw-text); }
+.listing { margin: 20px 0 26px; }
+.listing figcaption { font-style: italic; font-size: var(--fs-small); letter-spacing: var(--track); text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+.listing figcaption b { color: var(--strong); font-weight: var(--fw-strong); font-style: normal; }
+.out { border: 1px solid var(--rule); margin-top: 12px; }
+.out summary { cursor: pointer; padding: 6px 16px; font-size: var(--fs-small); letter-spacing: var(--track); color: var(--muted); }
+.out summary:hover { color: var(--strong); }
+.out[open] summary { border-bottom: 1px dashed var(--rule); }
+.out pre { padding: 8px 16px 12px; }
+.out summary b { color: var(--strong); font-weight: var(--fw-strong); text-transform: uppercase; }
+.out pre { color: var(--text); }
+pre.sh, pre.plain { margin: 12px 0 18px; padding: 10px 12px; border: 1px solid var(--rule); }
+pre.sh code::before { content: "$ "; color: var(--faint); }
+.recap, .try { margin: 40px 0 0; }
+.recap dl { display: grid; grid-template-columns: minmax(8em, max-content) 1fr; gap: 0; margin: 0; font-size: 13px; }
+.recap dt, .recap dd { margin: 0; padding: 6px 12px 6px 0; border-bottom: 1px solid var(--rule); }
+.recap dd { color: var(--muted); font-style: italic; font-weight: var(--fw-light); }
+.try li { color: var(--text); }
+.pager { display: flex; justify-content: space-between; gap: 16px; margin: 56px 0 0; padding-top: 16px; border-top: 1px solid var(--rule); font-size: 13px; }
+.pager a { text-decoration: none; padding: 6px 10px; border: 1px solid var(--rule); }
+.pager small { display: block; font-size: var(--fs-small); color: var(--muted); letter-spacing: var(--track); text-transform: uppercase; }
+.pager a:hover small { color: var(--bg); }
+.pager .next { margin-left: auto; text-align: right; }
+.next-step { margin-top: 32px; }
+@media (max-width: 860px) {
+  .learn { grid-template-columns: minmax(0, 1fr); }
+  .toc { position: static; }
+}
+.toc ol { max-height: calc(100vh - 64px); overflow-y: auto; }   /* a long sidebar (the cookbook) scrolls on its own */
+.toc li.grp { padding: 14px 4px 4px; font-size: var(--fs-small); font-weight: var(--fw-label); letter-spacing: var(--track); text-transform: uppercase; color: var(--muted); }
+/* No Starch-style italics: a new term in italic, and the opening paragraph as an italic lead */
+article p b, article li b { font-style: italic; font-weight: var(--fw-label); }
+article h1 + p { font-style: italic; font-size: var(--lead-size); line-height: 1.55; }
+/* labels in Plex Sans Condensed: the top bar, the menu, the black boxes and the small uppercase headings */
+.bar, #theme, nav.site, nav.jump, h2 .hb, .inv, article .kicker, .toc summary, .toc li.grp, .listing figcaption, .out summary, .pager small
+  { font-family: var(--font-label); font-size: var(--fs-label); font-weight: var(--fw-ui); }
+.bar .cell.first, h2 .hb, .inv { font-weight: var(--fw-box); }
+.listing figcaption b, .out summary b { font-weight: var(--fw-box); }
 </style>
 </head>
 <body>
 <div class="wrap">
-<div class="bar"><span class="cell first">OTYPE</span><span class="cell">1.1</span><span class="cell">214 ops</span><span class="cell end">octatrack</span><button id="theme" class="cell" type="button">dark</button></div>
+<div class="bar"><span class="cell first">OTYPE</span><span class="cell">1.1</span><span class="cell steps" aria-hidden="true"><i class="f on"></i><i class=""></i><i class=""></i><i class=""></i><i class="f"></i><i class=""></i><i class=""></i><i class=""></i><i class="f"></i><i class=""></i><i class=""></i><i class=""></i><i class="f"></i><i class=""></i><i class=""></i><i class=""></i></span><span class="cell">214 ops</span><span class="cell tag">scripting for the octatrack</span><span class="cell end">octatrack</span><button id="theme" class="cell" type="button">dark</button></div>
 <header class="top">
   <h1 aria-label="otype"><svg class="mark" viewBox="0 0 29 10" aria-hidden="true" shape-rendering="crispEdges" fill="currentColor"><rect x="7" y="0" width="1" height="1"/><rect x="7" y="1" width="1" height="1"/><rect x="1" y="2" width="3" height="1"/><rect x="6" y="2" width="4" height="1"/><rect x="12" y="2" width="1" height="1"/><rect x="16" y="2" width="1" height="1"/><rect x="18" y="2" width="4" height="1"/><rect x="25" y="2" width="3" height="1"/><rect x="0" y="3" width="1" height="1"/><rect x="4" y="3" width="1" height="1"/><rect x="7" y="3" width="1" height="1"/><rect x="12" y="3" width="1" height="1"/><rect x="16" y="3" width="1" height="1"/><rect x="18" y="3" width="1" height="1"/><rect x="22" y="3" width="1" height="1"/><rect x="24" y="3" width="1" height="1"/><rect x="28" y="3" width="1" height="1"/><rect x="0" y="4" width="1" height="1"/><rect x="4" y="4" width="1" height="1"/><rect x="7" y="4" width="1" height="1"/><rect x="12" y="4" width="1" height="1"/><rect x="16" y="4" width="1" height="1"/><rect x="18" y="4" width="1" height="1"/><rect x="22" y="4" width="1" height="1"/><rect x="24" y="4" width="5" height="1"/><rect x="0" y="5" width="1" height="1"/><rect x="4" y="5" width="1" height="1"/><rect x="7" y="5" width="1" height="1"/><rect x="12" y="5" width="1" height="1"/><rect x="16" y="5" width="1" height="1"/><rect x="18" y="5" width="1" height="1"/><rect x="22" y="5" width="1" height="1"/><rect x="24" y="5" width="1" height="1"/><rect x="0" y="6" width="1" height="1"/><rect x="4" y="6" width="1" height="1"/><rect x="7" y="6" width="1" height="1"/><rect x="10" y="6" width="1" height="1"/><rect x="12" y="6" width="1" height="1"/><rect x="16" y="6" width="1" height="1"/><rect x="18" y="6" width="1" height="1"/><rect x="22" y="6" width="1" height="1"/><rect x="24" y="6" width="1" height="1"/><rect x="28" y="6" width="1" height="1"/><rect x="1" y="7" width="3" height="1"/><rect x="8" y="7" width="2" height="1"/><rect x="13" y="7" width="4" height="1"/><rect x="18" y="7" width="4" height="1"/><rect x="25" y="7" width="3" height="1"/><rect x="16" y="8" width="1" height="1"/><rect x="18" y="8" width="1" height="1"/><rect x="13" y="9" width="3" height="1"/><rect x="18" y="9" width="1" height="1"/></svg></h1>
-  <p class="tag">scripting for the octatrack</p>
-  <nav class="site" aria-label="Site"><a href="learn/">learn</a><a href="./" aria-current="page">reference</a><a href="roadmap.html">roadmap</a><a href="https://github.com/nordseele/otype/blob/main/docs/cookbook.md">cookbook</a><a href="https://github.com/nordseele/otype">github</a></nav>
-  <div class="steps" aria-hidden="true"><i class="f on"></i><i class=""></i><i class=""></i><i class=""></i><i class="f"></i><i class=""></i><i class=""></i><i class=""></i><i class="f"></i><i class=""></i><i class=""></i><i class=""></i><i class="f"></i><i class=""></i><i class=""></i><i class=""></i></div>
+  <nav class="site" aria-label="Site"><a href="learn/">learn</a><a href="./" aria-current="page">reference</a><a href="roadmap.html">roadmap</a><a href="cookbook.html">cookbook</a><a href="https://github.com/nordseele/otype">github</a></nav>
 </header>
 <div class="overview">
   <h2><span class="hb">1.1 · 16 operator categories</span></h2>
@@ -257,9 +344,8 @@ footer a { color: inherit; text-decoration: underline; text-underline-offset: 3p
   btn.addEventListener('click', function () {
     var t = current() === 'dark' ? 'light' : 'dark'; root.setAttribute('data-theme', t); label();
     try { localStorage.setItem('otype-theme', t); } catch (e) {}
-  });
-  var steps = Array.prototype.slice.call(document.querySelectorAll('.steps i')), at = 0;
-  var tempo = parseFloat(getComputedStyle(root).getPropertyValue('--tempo')) * 1000 || 500;
+  });  var steps = Array.prototype.slice.call(document.querySelectorAll('.steps i')), at = 0;
+  var tempo = parseFloat(getComputedStyle(root).getPropertyValue('--tempo')) * 1000 || 150;
   if (steps.length && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     setInterval(function () { steps[at].classList.remove('on'); at = (at + 1) % steps.length; steps[at].classList.add('on'); }, tempo);
   }
