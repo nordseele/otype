@@ -1,0 +1,110 @@
+<h1>Decisions and loops</h1>
+
+<p>You have already used two words that end with a colon: <code>l 1 16:</code> and <code>if c:</code>. They are
+<b>modifiers</b>: they decide whether, how often, or with which chance the rest of the line runs. This study goes
+through all of them and builds a drum fill: a snare roll that thickens towards the end of the bar.</p>
+
+<h2>A modifier, then a line or a block</h2>
+
+<p>A modifier ends with <code>:</code>. What it governs is either the rest of the same line, or, when nothing
+follows the colon, the indented lines below it:</p>
+
+<pre class="oty" data-caption="The same loop, in one line and as a block">def two_forms
+  menu "LEARN" >> "TWO FORMS"
+  l 1 4: tr.add i
+  l 9 12:
+    tr.add i
+    pl.set i amp.vol 100</pre>
+
+<p>A block ends at the first line that is less indented. All the lines of one block must start at the same
+column; the width is yours to choose, but only spaces count (a tab is an error). Modifiers also chain on one line,
+read from left to right: <code>l 1 16: if er 5 16 i: tr.add i</code> is a loop, then a condition, then the
+action.</p>
+
+<h2><code>if</code>, <code>elif</code>, <code>else</code></h2>
+
+<p><code>if c:</code> runs what it governs when <code>c</code> is true. <code>elif c:</code> (else if) and
+<code>else:</code> follow it, on the next lines and at the same indentation; only the first branch whose condition
+holds runs.</p>
+
+<pre class="oty" data-caption="Three cases for each step" data-run="kick_snare_hat" data-runargs="-v">def kick_snare_hat
+  menu "LEARN" >> "K S H"
+  tr.clr
+  l 1 16:
+    tr.add i
+    if eq mod i 8 1: pl.set i amp.vol 127
+    elif eq mod i 8 5: pl.set i amp.vol 110
+    else: pl.set i amp.vol 50</pre>
+
+<h2>Loops: <code>l</code> and <code>each</code></h2>
+
+<p><code>l a b:</code> counts <code>i</code> from <code>a</code> to <code>b</code>, both included, downwards if
+<code>a</code> is greater. Its bounds are fixed before the run: numbers, a <code>const</code>, a
+<code>param</code>, or an argument of your function, but never a variable. That is what lets OType promise that
+every run ends.</p>
+
+<p>Inside a loop in a loop, <code>i</code> is the inner counter and <code>j</code> the outer one:</p>
+
+<pre class="oty" data-caption="Two counters: j the beat, i the step in the beat" data-run="diagonal">def diagonal
+  menu "LEARN" >> "DIAGONAL"
+  tr.clr
+  l 1 4:                                # j: beats 1..4
+    l 1 4:                              # i: steps 1..4 of the beat
+      if eq i j: tr.add add mul sub j 1 4 i</pre>
+
+<p>The trig moves one step later in each beat: step 1 of the first beat, step 2 of the second, and so on.
+<code>add mul sub j 1 4 i</code> turns the beat and the step in the beat into a step of the pattern:
+(j − 1) × 4 + i. Everything after <code>#</code> is a comment.</p>
+
+<p><code>each:</code> repeats for each step of the current step set, with <code>i</code> as the step. It shines
+once you narrow the steps to, say, those that hold a trig; that is the subject of
+<a href="context.html">tracks and steps</a>.</p>
+
+<h2>Leaving early: <code>break</code> and <code>stop</code></h2>
+
+<p><code>break</code> leaves the loop it is in; <code>stop</code> ends the whole function there.</p>
+
+<pre class="oty" data-caption="Stop placing trigs past step 6" data-run="first_six">def first_six
+  menu "LEARN" >> "FIRST SIX"
+  tr.clr
+  l 1 16:
+    if gt i 6: break
+    tr.add i</pre>
+
+<h2>Chance and counting: <code>prob</code>, <code>every</code>, <code>skip</code></h2>
+
+<p><code>prob p:</code> runs what it governs with a chance of <code>p</code> percent. Now the fill: the further
+into the bar, the likelier a snare.</p>
+
+<pre class="oty" data-caption="A fill that thickens" data-run="snare_fill" data-runargs="--seed 3">def snare_fill
+  menu "LEARN" >> "FILL"
+  tr.clr
+  l 1 16: prob mul i 6: tr.add i</pre>
+
+<p>Each run draws new numbers, so each press gives a different fill. The simulator shows one of them (its
+<code>--seed</code> fixes which; the <a href="randomness.html">randomness study</a> explains seeds).</p>
+
+<p><code>every n:</code> runs once every <code>n</code> times the line is reached, and <code>skip n:</code> every
+time except that one. Their count is kept from one press to the next, so <code>every 4: tr.add 16</code> adds a
+trig on step 16 on every fourth press only.</p>
+
+<div class="recap">
+<h2>What you learned</h2>
+<dl>
+  <dt><code>…:</code></dt><dd>a modifier governs the rest of its line, or the indented block below</dd>
+  <dt><code>if</code> · <code>elif</code> · <code>else</code></dt><dd>choose between branches</dd>
+  <dt><code>l a b:</code> · <code>each:</code></dt><dd>count with <code>i</code> (and <code>j</code> outside) · visit the steps</dd>
+  <dt><code>break</code> · <code>stop</code></dt><dd>leave the loop · leave the function</dd>
+  <dt><code>prob p:</code></dt><dd>with p % chance</dd>
+  <dt><code>every n:</code> · <code>skip n:</code></dt><dd>once every n times · all but that time</dd>
+</dl>
+</div>
+
+<div class="try">
+<h2>Try it</h2>
+<ul>
+  <li>Rewrite <code>first_six</code> without <code>break</code>, with the loop bounds alone.</li>
+  <li>Make the fill thin out instead: a chance of <code>sub 100 mul i 6</code>.</li>
+  <li>Add an <code>every 2:</code> line that clears the track on every other press.</li>
+</ul>
+</div>

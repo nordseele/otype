@@ -1,0 +1,106 @@
+<h1>Quickstart</h1>
+
+<p>In this study you write a script that places a kick on every beat, check it on the computer, see what it does to
+a pattern, then run it on the Octatrack. Then you change it twice, to see how quickly an idea becomes a new
+function.</p>
+
+<h2>Write the file</h2>
+
+<p>Create a text file named <code>BASICS.OTY</code> and type this in it:</p>
+
+<pre class="oty" data-caption="BASICS.OTY" data-run="four_floor">def four_floor
+  menu "BASICS" >> "FOUR FLOOR"
+  tr.clr
+  l 1 16: if eq mod i 4 1: tr.add i</pre>
+
+<p>Line by line:</p>
+
+<ul>
+  <li><code>def four_floor</code> starts a <b>function</b> named <code>four_floor</code>. Everything indented
+    below it is its body.</li>
+  <li><code>menu "BASICS" >> "FOUR FLOOR"</code> says where the function appears in the script menu: in the
+    category <code>BASICS</code>, under the name <code>FOUR FLOOR</code>.</li>
+  <li><code>tr.clr</code> clears the trigs of the track. Names with a dot are the Octatrack's operations:
+    <code>tr</code> is the family (trigs), <code>clr</code> the action.</li>
+  <li><code>l 1 16: … </code> repeats the rest of the line for <code>i</code> = 1, 2, … 16, the steps of the
+    pattern. On each step, <code>if eq mod i 4 1:</code> asks: is the remainder of <code>i</code> divided by 4 equal
+    to 1? It is on steps 1, 5, 9 and 13, and there <code>tr.add i</code> places a trig.</li>
+</ul>
+
+<p>Do not worry yet about <code>eq mod i 4 1</code>: the <a href="expressions.html">next study</a> is about
+reading that kind of line. Note the indentation: two spaces here, but any width works, as long as the lines of one
+block line up.</p>
+
+<h2>Check it</h2>
+
+<p>From the OType repository, run the checker on your file. It applies exactly the rules the unit applies when it
+loads the scripts:</p>
+
+<pre class="sh">python3 tools/otype.py check -v BASICS.OTY</pre>
+
+<p>It answers with one line per function: <code>ok</code>, its menu entry, and its <b>cost</b>, the most work one
+run can do (more on this in <a href="errors-and-limits.html">the last study</a>). A mistake gives the file, the line
+and what is wrong instead.</p>
+
+<h2>See what it does</h2>
+
+<p>The simulator runs a function on a pattern, on the computer, and shows the steps afterwards:</p>
+
+<pre class="sh">python3 tools/otype.py run four_floor BASICS.OTY</pre>
+
+<p>The output under the listing above is what it prints. <code>T1</code> is track 1: an <code>X</code> is a trig,
+a dot an empty step. With <code>--bank</code> you can run the same function on a real bank file copied from your
+card; nothing is ever written to it.</p>
+
+<h2>Run it on the machine</h2>
+
+<p>Copy <code>BASICS.OTY</code> into the folder <code>/SCRIPTS/</code> at the root of the CF card, put the card
+back, and load the scripts (your firmware says how). The unit compiles the file itself: no firmware to rebuild.</p>
+
+<p>Open the script menu (in OT1, press FUNCTION twice), choose <code>BASICS</code>, then <code>FOUR FLOOR</code>.
+A box asks YES or NO first: because <code>tr.clr</code> erases trigs, OType asks before any function
+that changes the project in a way you might regret. Answer YES, and the current track has its four kicks.</p>
+
+<h2>Change it</h2>
+
+<p>An eighth-note hat instead: a trig on every odd step. Add a second function to the same file:</p>
+
+<pre class="oty" data-caption="BASICS.OTY, a second function" data-run="eighths">def eighths
+  menu "BASICS" >> "EIGHTHS"
+  tr.clr
+  l 1 16: if eq mod i 2 1: tr.add i</pre>
+
+<p>Now let the player choose the spacing before the function runs. <code>param</code> declares a setting with a
+default, a minimum and a maximum; the menu shows it, and the script reads it like a number:</p>
+
+<pre class="oty" data-caption="A setting the player edits on the unit" data-run="every_n">def every_n
+  menu "BASICS" >> "EVERY N"
+  param gap 4 1 16
+  tr.clr
+  l 1 16: if eq mod i gap 1: tr.add i</pre>
+
+<p>Copy the file again and load the scripts: the three functions are in <code>BASICS</code>. That is the whole
+loop of working with OType: edit, check, copy, run.</p>
+
+<div class="recap">
+<h2>What you learned</h2>
+<dl>
+  <dt><code>def name</code></dt><dd>starts a function; its body is indented below</dd>
+  <dt><code>menu "CAT" >> "NAME"</code></dt><dd>lists the function in the script menu</dd>
+  <dt><code>param name default min max</code></dt><dd>a setting the player edits before the run</dd>
+  <dt><code>tr.clr</code> · <code>tr.add s</code></dt><dd>clear the trigs · place a trig on step <code>s</code></dd>
+  <dt><code>l a b:</code></dt><dd>repeat for <code>i</code> = a … b</dd>
+  <dt><code>if c:</code></dt><dd>do the rest of the line only if <code>c</code> is true</dd>
+  <dt><code>check</code> · <code>run</code></dt><dd>check a file, run a function on the computer</dd>
+</dl>
+</div>
+
+<div class="try">
+<h2>Try it</h2>
+<ul>
+  <li>Move the kicks to the off-beats: steps 3, 7, 11 and 15.</li>
+  <li>Give <code>every_n</code> a second <code>param</code>, <code>start</code>, that shifts the first trig.</li>
+  <li>Make a mistake on purpose (remove the <code>i</code> after <code>tr.add</code>) and read what the checker
+    says.</li>
+</ul>
+</div>

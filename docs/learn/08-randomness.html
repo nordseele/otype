@@ -1,0 +1,93 @@
+<h1>Chance you can repeat</h1>
+
+<p>Random choices are where scripts surprise you. They are also where you want control: keep the variation you
+liked, come back to it tomorrow. This study covers OType's random values, its lists, and the seeds that make chance
+repeatable.</p>
+
+<h2>Random values</h2>
+
+<table>
+  <thead><tr><th>write</th><th>gives</th></tr></thead>
+  <tbody>
+    <tr><td><code>rnd n</code></td><td>0 to n − 1</td></tr>
+    <tr><td><code>rrand a b</code></td><td>a to b, both included</td></tr>
+    <tr><td><code>toss</code></td><td>0 or 1</td></tr>
+    <tr><td><code>chance p</code></td><td>1 with p % chance, else 0</td></tr>
+    <tr><td><code>prob p:</code></td><td>the modifier you know: run the line with p % chance</td></tr>
+  </tbody>
+</table>
+
+<h2>Lists</h2>
+
+<p>A list is a few numbers between braces, up to sixteen: <code>{60 90 127}</code>. Lists are constants, written
+in the script; usually you name them with <code>const</code>. Three operations read them: <code>pick list</code>
+(one element at random), <code>at list n</code> (the n-th, from 1) and <code>len list</code> (how many).</p>
+
+<pre class="oty" data-caption="Random hats, with volumes from a list" data-run="rnd_hats" data-runargs="-v --seed 5">const vols {60 90 127}
+
+def rnd_hats
+  menu "LEARN" >> "RND HATS"
+  tr.clr
+  l 1 16:
+    if chance 60:
+      tr.add i
+      pl.set i amp.vol pick vols</pre>
+
+<p>Some operations draw a value for every step of the context at once: <code>pl.rnd p</code> locks parameter
+<code>p</code> at random on each trig, <code>smp.rnd a b</code> locks a sample slot between <code>a</code> and
+<code>b</code>. They save you a loop.</p>
+
+<h2>Seeds</h2>
+
+<p>Each press draws new numbers. <code>seed n</code> fixes the draws: from that line on, the same <code>n</code>
+always gives the same results, on the unit as in the simulator. Make the seed a setting, and the player can browse
+variations and come back to the one they liked:</p>
+
+<pre class="oty" data-caption="Variation 1, 2, 3…: each one always the same" data-run="variations">def variations
+  menu "LEARN" >> "VARIATIONS"
+  param pick_no 1 1 99
+  seed pick_no
+  tr.clr
+  l 1 16: prob 40: tr.add i</pre>
+
+<p>A seed holds until the end of the block it is in; outside it, the draws go on as before. That lets you fix one
+part of a function and leave the rest free.</p>
+
+<p>Chance in OType comes from five separate <b>streams</b>: one for <code>rnd rrand pick</code>, one for
+<code>toss chance</code>, one for <code>prob</code>, one for <code>drunk</code>, and one for the files on the
+card. Adding a <code>prob</code> line therefore does not change what the next <code>rrand</code> gives.
+<code>seed</code> sets all five; <code>rand.seed</code>, <code>toss.seed</code>, <code>prob.seed</code>,
+<code>drunk.seed</code> and <code>file.seed</code> set one each.</p>
+
+<h2>A/B with a seed</h2>
+
+<p>Combine a seed with <code>flip</code> from <a href="variables.html">variables and memory</a>: one press gives
+variation 7, the next one the pattern without randomness, and so on.</p>
+
+<pre class="oty" data-caption="One press a variation, the next the reference">def ab_locks
+  menu "LEARN" >> "A/B FX"
+  seed ? flip 7 0
+  steps has.trig:
+    pl.rnd fx1 1</pre>
+
+<div class="recap">
+<h2>What you learned</h2>
+<dl>
+  <dt><code>rnd</code> · <code>rrand</code> · <code>toss</code> · <code>chance</code></dt><dd>random values</dd>
+  <dt><code>{…}</code> · <code>pick</code> · <code>at</code> · <code>len</code></dt><dd>constant lists and their reading</dd>
+  <dt><code>pl.rnd</code> · <code>smp.rnd</code></dt><dd>a random lock on every trig of the context</dd>
+  <dt><code>seed n</code></dt><dd>the same draws for the same n, until the end of the block</dd>
+  <dt>streams</dt><dd>five independent sources; <code>rand.seed</code> and the others seed one</dd>
+</dl>
+</div>
+
+<div class="try">
+<h2>Try it</h2>
+<ul>
+  <li>Run <code>variations</code> on the computer with <code>--param pick_no=2</code>, then 3: each pattern is
+    always the same.</li>
+  <li>Put the <code>seed</code> of <code>rnd_hats</code> in a block around the trigs only, so the volumes stay
+    free.</li>
+  <li>Use <code>at vols rrand 1 3</code> instead of <code>pick vols</code>. Is it the same?</li>
+</ul>
+</div>

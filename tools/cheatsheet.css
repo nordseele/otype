@@ -9,6 +9,11 @@
   --faint: #b0b0b0;     /* comments, step borders, heading and table rules */
   --rule: #d0d0cc;      /* frames, separators between commands */
   --font: "IBM Plex Mono", ui-monospace, Menlo, monospace;  /* the one font everywhere */
+  --code-bg: #eaedf0;   /* every piece of code: blocks and inline */
+  --code-fg: #1a1f26;
+  --hl-kw: #006f9c;     /* keywords: def menu l if trk steps … */
+  --hl-num: #7d6000;    /* numbers */
+  --hl-com: #007a4d;    /* comments */
   --fs-body: 14px;      /* body text size */
   --fs-code: 13px;      /* code blocks and signatures */
   --fs-small: 11px;     /* status bar, chips, headings, soft keys */
@@ -25,11 +30,13 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #0d0d0d; --text: #cfcfcf; --strong: #ffffff; --muted: #8c8c8c; --faint: #4d4d4d; --rule: #3a3a3a;
+    --code-bg: #1a2028; --code-fg: #e4e4e4; --hl-kw: #00aced; --hl-num: #e3bf3b; --hl-com: #00d181;
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
   --bg: #0d0d0d; --text: #cfcfcf; --strong: #ffffff; --muted: #8c8c8c; --faint: #4d4d4d; --rule: #3a3a3a;
+  --code-bg: #1a2028; --code-fg: #e4e4e4; --hl-kw: #00aced; --hl-num: #e3bf3b; --hl-com: #00d181;
   color-scheme: dark;
 }
 
@@ -63,6 +70,9 @@ header.top { margin: 40px 0 0; }
 h1 { margin: 0; font: inherit; }
 h1 .mark { display: block; height: calc(var(--px-mark) * 10); width: auto; color: var(--strong); }
 .tag { margin: 14px 0 18px; color: var(--muted); font-size: var(--fs-body); }
+nav.site { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 22px; font-size: var(--fs-small); letter-spacing: var(--track); text-transform: uppercase; }
+nav.site a { padding: 4px 9px; border: 1px solid var(--rule); text-decoration: none; line-height: 1.3; }
+nav.site a:hover, nav.site a[aria-current] { background: var(--strong); color: var(--bg); border-color: var(--strong); font-weight: 600; }
 .steps { display: flex; gap: var(--step-gap); padding: 3px; flex-wrap: wrap; }
 .steps i { display: block; width: var(--step); height: var(--step); border: 1px solid var(--faint); }
 .steps i.f { background: var(--muted); border-color: var(--muted); }
@@ -103,7 +113,9 @@ h3 { margin: 22px 0 8px; font-size: var(--fs-small); font-weight: 400; letter-sp
 .examples { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 40px 56px; margin: 56px 0 64px; }
 .ex { margin: 0; min-width: 0; padding-top: 12px; border-top: 1px solid var(--faint); }
 .ex figcaption { font-size: var(--fs-small); letter-spacing: var(--track); text-transform: uppercase; color: var(--muted); margin-bottom: 12px; }
-pre { margin: 0; overflow-x: auto; font: 300 var(--fs-code)/1.7 var(--font); color: var(--text); }
+pre { margin: 0; overflow-x: auto; font: 400 var(--fs-code)/1.7 var(--font); color: var(--text); }
+.ex pre, .howto pre { background: var(--code-bg); color: var(--code-fg); padding: 12px 16px; }
+.howto p code { background: var(--code-bg); color: var(--code-fg); padding: 1px 5px; }
 
 /* ---- reference sheet ---- */
 /* one category per band, its operators left to right: no climbing back up a column */
@@ -128,16 +140,11 @@ footer { margin-top: 48px; padding-top: 20px; border-top: 1px solid var(--rule);
 footer p { max-width: 80ch; margin: 0 0 8px; }
 footer a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
 
-/* ---- syntax, without hue ---- */
-.c-kw { color: var(--strong); font-weight: 600; }                       /* keywords: def menu l if prob each trk steps … */
-.c-api { }                                                              /* API ops: normal text */
-.c-user { text-decoration: underline dotted 1px; text-underline-offset: 3px; }  /* user names: dotted underline */
-.c-str { font-style: italic; font-weight: 400; color: var(--muted); }   /* strings */
-.c-num { color: var(--strong); }                                        /* numbers */
-.c-com { color: var(--faint); }                                         /* comments */
-.c-var { }                                                              /* variables: normal text */
-.c-cond { background: var(--strong); color: var(--bg); font-weight: 600; padding: var(--pad-cond); }  /* trig conditions */
-.c-op { color: var(--muted); }                                          /* | and >> */
+/* ---- syntax: three colours, one weight; everything else in the code colour ---- */
+.c-kw { color: var(--hl-kw); }    /* keywords: def menu l if prob each trk steps … */
+.c-num { color: var(--hl-num); }  /* numbers */
+.c-com { color: var(--hl-com); }  /* comments */
+.c-op { color: var(--muted); }    /* | and >> */
 
 @media (max-width: 760px) { .tools { position: static; } }  /* the section buttons would cover a phone screen */
 @media (max-width: 520px) {

@@ -1,0 +1,35 @@
+<h1>Appendix: scope at a glance</h1>
+
+<p>Who can see a name, who can change it, and how long it lives. Each line points to the study that explains
+it.</p>
+
+<table>
+  <thead><tr><th>name</th><th>seen by</th><th>changed by</th><th>lives</th></tr></thead>
+  <tbody>
+    <tr><td><code>a b c d</code></td><td>one call of one function</td><td>that call</td><td>one run, 0 at the start (<a href="variables.html">variables</a>)</td></tr>
+    <tr><td><code>x y z t</code></td><td>every function</td><td>every function</td><td>between presses, 0 at startup (<a href="variables.html">variables</a>)</td></tr>
+    <tr><td><code>var name</code></td><td>its function</td><td>its function</td><td>between presses and wakes, from the loading of the scripts (<a href="variables.html">variables</a>)</td></tr>
+    <tr><td><code>i j</code></td><td>the loop and what it governs</td><td>the loops only</td><td>the loop (<a href="decisions-and-loops.html">loops</a>)</td></tr>
+    <tr><td>arguments</td><td>their function</td><td>no one: read-only</td><td>one call (<a href="functions.html">functions</a>)</td></tr>
+    <tr><td><code>param</code></td><td>its function</td><td>the player, before the run</td><td>one run (<a href="the-player.html">the player</a>)</td></tr>
+    <tr><td><code>const</code></td><td>every file</td><td>no one</td><td>always (<a href="functions.html">functions</a>)</td></tr>
+    <tr><td>functions</td><td>every file</td><td>—</td><td>always (<a href="functions.html">functions</a>)</td></tr>
+    <tr><td><code>flip o drunk</code>, <code>every</code> counters</td><td>their function</td><td>their function</td><td>between presses, reset at startup (<a href="variables.html">variables</a>)</td></tr>
+    <tr><td>tracks and steps (<code>trk</code>, <code>steps</code>)</td><td>the line or block, and the functions it calls (a copy)</td><td>the line or block</td><td>until the end of the block (<a href="context.html">tracks and steps</a>)</td></tr>
+    <tr><td><code>seed</code></td><td>the rest of the block, and the functions it calls</td><td>the block</td><td>until the end of the block (<a href="randomness.html">chance</a>)</td></tr>
+  </tbody>
+</table>
+
+<h2>Coming from Teletype</h2>
+
+<p>OType borrows Teletype's prefix notation, its modifiers before <code>:</code> and many of its words. The main
+differences:</p>
+
+<ul>
+  <li>no limit of six lines: blocks by indentation, named functions with arguments, instead of scripts 1 to 8;</li>
+  <li>no <code>;</code>: an indented block replaces several commands on a line;</li>
+  <li>no <code>W</code> (while): every loop is bounded before the run;</li>
+  <li>operations act on a context of tracks and steps;</li>
+  <li><code>a b c d</code> are local, <code>x y z t</code> global and kept between presses;</li>
+  <li>scripts are written on a computer, since the Octatrack has no keyboard port.</li>
+</ul>

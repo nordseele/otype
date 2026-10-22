@@ -1601,6 +1601,14 @@ class TestTypedParamsAndWarnings(Base):
 class TestDocsAndEditor(unittest.TestCase):
     """The generated cheat sheet and the VS Code extension follow the language (04/10)."""
 
+    def test_learn_listings_pass_and_run(self):
+        import learn                             # tools/learn.py: refuses to build when a listing fails
+        with tempfile.TemporaryDirectory() as d:
+            pages = learn.build(d)
+            self.assertEqual(len(pages), len(learn.chapters()))
+            quick = open(os.path.join(d, "quickstart.html"), encoding="utf-8").read()
+            self.assertIn("X...X...X...X...", quick)     # four_floor's run is printed under its listing
+
     def test_cheatsheet_places_every_keyword_and_operation(self):
         import cheatsheet                          # tools/cheatsheet.py: refuses to build when an entry has no section
         page = cheatsheet.build(False)

@@ -1,0 +1,73 @@
+<h1>When something is wrong</h1>
+
+<p>Mistakes are part of writing scripts. OType tries to catch them before they reach the music, and to say
+plainly what is wrong. This study shows what an error looks like, what happens to a file that has one, and the few
+limits that keep every run short.</p>
+
+<h2>Reading an error</h2>
+
+<p>The checker on the computer, the VS Code extension and the unit itself apply the same rules, and write the
+same messages. Each one gives the file, the line, the function and what is wrong:</p>
+
+<pre class="plain">BASICS.OTY:8: bad_call: error: tr.add expects 1 argument (step), got 0
+BASICS.OTY:4: bad_loop: error: l bound must be constant (a): use a number, a const, a param or an argument that is constant at every call
+BASICS.OTY:10: ping: error: loop ping>pong>ping</pre>
+
+<p>On the unit, the screen shows a summary and the file <code>/SCRIPTS/ERRORS.TXT</code> holds the full list.</p>
+
+<h2>Only the faulty function is refused</h2>
+
+<p>An error refuses its own function, and the functions that call it; everything else in the file, and in the
+other files, still loads. One typo never empties your menu. A <b>warning</b>, such as an operation whose value is
+not used, lets the function load.</p>
+
+<h2>Every run ends</h2>
+
+<p>A script runs inside the Octatrack's own work, so it must never hang the machine. OType makes sure of it with
+three rules you have met:</p>
+
+<ul>
+  <li>loop bounds are fixed before the run (<code>l 1 a:</code> is refused);</li>
+  <li>a function never calls itself, even through others;</li>
+  <li>calls and blocks nest at most eight deep.</li>
+</ul>
+
+<p>From these, the checker computes each function's <b>cost</b>: the most work one run can do, in units of the
+operations it uses. <code>check -v</code> prints it, for example <code>max cost 176/4096</code>; a function over
+the budget is refused as <code>too long</code>. When it happens, look for a loop over all the steps inside another
+loop, or a <code>trk all</code> around heavy work.</p>
+
+<h2>A few numbers to know</h2>
+
+<table>
+  <tbody>
+    <tr><td>a line</td><td>128 characters, comment included</td></tr>
+    <tr><td>a text · a list</td><td>127 characters · 16 numbers</td></tr>
+    <tr><td>arguments · <code>param</code> · <code>var</code></td><td>4 · 8 · 16 per function</td></tr>
+    <tr><td>calls · blocks</td><td>8 deep · 8 deep</td></tr>
+    <tr><td>numbers</td><td>whole, from −32768 to 32767</td></tr>
+    <tr><td>the end box</td><td>29 characters</td></tr>
+  </tbody>
+</table>
+
+<h2>On the unit</h2>
+
+<p>An operation can still meet something the checker cannot know in advance: a track number out of range, a slot
+that is empty. It is then skipped and counted, and the run goes on; the simulator lists what was skipped. A few
+operations that would move audio while it plays, such as replacing a Flex slot in use, answer
+<code>STOP FIRST</code>.</p>
+
+<div class="recap">
+<h2>What you learned</h2>
+<dl>
+  <dt><code>FILE:LINE: function: error: …</code></dt><dd>every message says where and what</dd>
+  <dt><code>ERRORS.TXT</code></dt><dd>the full list, on the card</dd>
+  <dt>refused</dt><dd>only the faulty function and its callers</dd>
+  <dt>cost</dt><dd>the most work one run can do, checked against the budget</dd>
+</dl>
+</div>
+
+<p class="next-step">You have finished the studies. The <a href="../index.html">command reference</a> lists every
+operation; the <a href="https://github.com/nordseele/otype/blob/main/docs/cookbook.md">cookbook</a> has more than
+thirty tested recipes; the <a href="https://github.com/nordseele/otype/blob/main/docs/syntax.md">language
+reference</a> gives every rule in full.</p>

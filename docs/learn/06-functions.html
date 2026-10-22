@@ -1,0 +1,116 @@
+<h1>Functions</h1>
+
+<p>Every script so far was one function with a menu entry. A function can also be a word of your own, used by the
+others: write a Euclidean rhythm once, then call it on any track with any number of hits. This study builds a
+small library of such words.</p>
+
+<h2>Bricks</h2>
+
+<p>A function without <code>menu</code> does not appear in the menu. We call it a <b>brick</b>: the other
+functions use it. Its arguments follow its name, after a <code>|</code>:</p>
+
+<pre class="oty" data-caption="A brick, and a function that uses it twice" data-run="two_euclids" data-runargs="-v">def two_euclids
+  menu "LEARN" >> "2 EUCLIDS"
+  euclid_on | 1 5 0
+  euclid_on | 2 3 4
+
+def euclid_on | track hits rot
+  trk track:
+    tr.clr
+    l 1 16: if er.r hits 16 rot i: tr.add i</pre>
+
+<p>A call is the function's name, a <code>|</code>, then its values. The bar is required whenever your function
+takes arguments, and never written after one of the Octatrack's operations: at a glance, you see what is yours.
+Your names use letters, digits and <code>_</code>, never a dot; dotted names belong to the machine.</p>
+
+<p>Inside the brick, <code>track</code>, <code>hits</code> and <code>rot</code> are read like variables but cannot
+be changed. A function takes up to four arguments. They are usually numbers, but can also be a text, a list or a
+trig condition: OType works out which from the way the brick uses them, and checks every call.</p>
+
+<h2>Giving a value back: <code>ret</code></h2>
+
+<p><code>ret value</code> ends the function and gives the value back to the caller, so the call can stand inside
+an expression like any operation:</p>
+
+<pre class="oty" data-caption="A function that computes a step" data-run="backbeat">def backbeat
+  menu "LEARN" >> "BACKBEAT"
+  tr.clr
+  tr.add beat_step | 2
+  tr.add beat_step | 4
+
+def beat_step | beat
+  ret sub mul beat 4 3       # beat 1..4 gives step 1, 5, 9 or 13</pre>
+
+<p>A function that ends without <code>ret</code> is worth 0. Called as a statement, its value is simply
+dropped.</p>
+
+<h2>What a function sees</h2>
+
+<p>Each call has its own <code>a b c d</code>, all at 0. A function you call cannot touch yours:</p>
+
+<pre class="oty" data-caption="Two a's that never meet" data-run="keep_a">def keep_a
+  menu "LEARN" >> "KEEP A"
+  a 5
+  set_a
+  msg "A IS STILL" a
+
+def set_a
+  a 9</pre>
+
+<p>The other things a function can see are shared: the global <code>x y z t</code>, every function, and every
+<code>const</code>. As the previous study showed, the called function also starts with a copy of the caller's
+tracks and steps. The <a href="scope.html">appendix</a> sums it all up in one table.</p>
+
+<h2>Constants</h2>
+
+<p><code>const name value</code>, at the start of a line, names a value that never changes: a number, a text, a
+list or a trig condition. Constants and functions are global: every file in <code>/SCRIPTS/</code> sees them,
+so a file can be a library that the others use.</p>
+
+<pre class="oty" data-caption="Names instead of numbers" data-run="named_tracks" data-runargs="-v">const kick 1
+const snare 2
+
+def named_tracks
+  menu "LEARN" >> "NAMED"
+  euclid_on | kick 4 0
+  euclid_on | snare 2 4
+
+def euclid_on | track hits rot
+  trk track:
+    tr.clr
+    l 1 16: if er.r hits 16 rot i: tr.add i</pre>
+
+<p>A name can only be used once across all the files: two functions, or a function and a constant, with the same
+name are both refused.</p>
+
+<h2>What functions cannot do</h2>
+
+<ul>
+  <li><b>Call themselves</b>, directly or through others. <code>ping</code> calling <code>pong</code> calling
+    <code>ping</code> is refused with <code>loop ping>pong>ping</code>.</li>
+  <li><b>Nest deeper than eight calls.</b></li>
+</ul>
+
+<p>Both rules, with the fixed loop bounds of <a href="decisions-and-loops.html">decisions and loops</a>, make sure
+a run always ends, and the checker can tell you in advance how much work it does at most.</p>
+
+<div class="recap">
+<h2>What you learned</h2>
+<dl>
+  <dt><code>def name | a b</code></dt><dd>a function with arguments</dd>
+  <dt>brick</dt><dd>a function without <code>menu</code>, used by the others</dd>
+  <dt><code>name | 1 2</code></dt><dd>calling your own function</dd>
+  <dt><code>ret v</code></dt><dd>end and give a value back</dd>
+  <dt><code>const name value</code></dt><dd>a named value, global to all files</dd>
+  <dt>no recursion, eight calls deep</dt><dd>so every run ends</dd>
+</dl>
+</div>
+
+<div class="try">
+<h2>Try it</h2>
+<ul>
+  <li>Give <code>euclid_on</code> a fourth argument: the number of steps of the rhythm.</li>
+  <li>Write a brick <code>clamp_vol | v</code> that returns <code>v</code> kept between 40 and 127.</li>
+  <li>Move <code>euclid_on</code> to its own file, <code>LIB.OTY</code>, and check both files together.</li>
+</ul>
+</div>

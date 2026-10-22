@@ -1,0 +1,110 @@
+<h1>Tracks and steps</h1>
+
+<p>So far every function worked on “the track”: the current one, the track you were on when you opened the menu.
+<code>tr.add 5</code> never says which track, and that is on purpose. Operations act on a <b>context</b>: a set of
+tracks, a set of steps, and a source of chance. This study changes the context to write a beat on three tracks at
+once.</p>
+
+<h2>Choosing the tracks: <code>trk</code></h2>
+
+<p><code>trk</code> takes one to eight track numbers, or <code>cur</code> (the current track), or
+<code>all</code>. Like a modifier, it governs the rest of its line or the block below:</p>
+
+<pre class="oty" data-caption="Kick, snare and hats on tracks 1, 2 and 3" data-run="beat" data-runargs="-v">def beat
+  menu "LEARN" >> "BEAT"
+  trk 1 2 3: tr.clr
+  trk 1: l 1 16: if eq mod i 4 1: tr.add i
+  trk 2:
+    tr.add 5
+    tr.add 13
+  trk 3: l 1 16: if er 11 16 i: tr.add i</pre>
+
+<p>With several tracks, OType runs what <code>trk</code> governs <b>once per track</b>, in the order written:
+<code>trk 1 2 3: tr.clr</code> clears track 1, then 2, then 3. Everything inside a pass, a loop or a random draw,
+runs again for the next track.</p>
+
+<h2>For the rest of the block</h2>
+
+<p><code>trk</code> can also stand alone, without a colon. It then sets the tracks <b>until the end of the
+block</b> it is in:</p>
+
+<pre class="oty" data-caption="trk as a statement">def on_track_2
+  menu "LEARN" >> "TRACK 2"
+  trk 2                 # from here to the end of the function
+  tr.clr
+  tr.add 1
+  tr.add 9</pre>
+
+<p>Either way, a block hands its context back when it ends: after <code>trk 2:</code> and its block, the next
+line is on the tracks it was on before.</p>
+
+<h2>Choosing the steps: <code>steps</code> and <code>step</code></h2>
+
+<p>The context also holds a set of steps, at first every step of the pattern. <code>steps</code> changes it:</p>
+
+<table>
+  <thead><tr><th>write</th><th>the steps become</th></tr></thead>
+  <tbody>
+    <tr><td><code>steps all</code></td><td>every step</td></tr>
+    <tr><td><code>steps 9 16</code></td><td>steps 9 to 16</td></tr>
+    <tr><td><code>steps has.trig</code></td><td>those of the current steps that hold a trig</td></tr>
+    <tr><td><code>steps is.empty</code></td><td>those of the current steps that are empty</td></tr>
+    <tr><td><code>step 5</code></td><td>step 5 alone</td></tr>
+  </tbody>
+</table>
+
+<p>A range replaces the steps; a test such as <code>has.trig</code> narrows the ones you already have. Operations
+that work on many steps at once, and <code>each:</code>, use this set:</p>
+
+<pre class="oty" data-caption="Accents on the hats, wherever their trigs fall" data-run="hat_accents" data-runargs="-v">def hat_accents
+  menu "LEARN" >> "HAT ACCENT"
+  trk 3:
+    tr.clr
+    l 1 16: if er 11 16 i: tr.add i
+    steps has.trig:
+      each: pl.set i amp.vol dr.v 1 i</pre>
+
+<p><code>each:</code> visits the steps that hold a trig, and <code>dr.v 1 i</code> reads curve 1, accents on the
+beats, at step <code>i</code>.</p>
+
+<h2>Locks go where the trigs are</h2>
+
+<p>On the Octatrack, a lock belongs to a trig. OType follows the machine: a lock written on an empty step is
+skipped, and the simulator counts it.</p>
+
+<pre class="oty" data-caption="Sixteen locks asked, two written" data-run="two_locks" data-runargs="-v">def two_locks
+  menu "LEARN" >> "TWO LOCKS"
+  tr.clr
+  tr.add 1
+  tr.add 9
+  l 1 16: pl.set i amp.vol 64</pre>
+
+<p>To lock a step without playing it, first make it a trigless lock: <code>tl.add s</code>.</p>
+
+<h2>A function inherits the context</h2>
+
+<p>When one of your functions calls another, the called function starts with a copy of the caller's context:
+the same tracks and steps. Whatever it changes stays inside it. This is what lets the next study write a function
+once and use it on any track.</p>
+
+<div class="recap">
+<h2>What you learned</h2>
+<dl>
+  <dt><code>trk 1 2:</code> · <code>trk cur</code> · <code>trk all</code></dt><dd>the tracks, one pass per track</dd>
+  <dt><code>trk 2</code> alone</dt><dd>the tracks until the end of the block</dd>
+  <dt><code>steps a b</code> · <code>steps has.trig</code> · <code>step s</code></dt><dd>the steps: a range, a test, one step</dd>
+  <dt><code>each:</code></dt><dd>visit the steps of the context</dd>
+  <dt><code>dr.v c s</code></dt><dd>a velocity from a ready-made curve</dd>
+  <dt><code>tl.add s</code></dt><dd>a trigless lock: a step that can hold locks without playing</dd>
+</dl>
+</div>
+
+<div class="try">
+<h2>Try it</h2>
+<ul>
+  <li>Put the snare of <code>beat</code> on track 2 with a single <code>if</code> inside a loop.</li>
+  <li>Lock a random volume on every trig of tracks 1 to 4 with <code>steps has.trig</code> and
+    <code>rrand 60 127</code>.</li>
+  <li>Use <code>steps 9 16</code> to clear only the second half of the bar with <code>tr.clr</code>.</li>
+</ul>
+</div>

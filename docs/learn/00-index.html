@@ -1,0 +1,48 @@
+<h1>Learn OType</h1>
+
+<p>OType is a small language for the Octatrack. A script is a text file on the CF card; each function in it becomes
+an entry in your firmware's script menu, or a live script that plays along with the sequencer. A function can place
+trigs, lock parameters, set up parts and scenes, send MIDI, arm the recorder, and work on audio files on the card.</p>
+
+<p>This guide teaches the language from the beginning. It is a series of short studies: each one builds something
+you can hear, and introduces the parts of the language it needs on the way. Read them in order; each study assumes
+the ones before it.</p>
+
+<pre class="oty" data-caption="A whole script: a kick on every beat of the current track">def four_floor
+  menu "BASICS" >> "FOUR FLOOR"
+  tr.clr
+  l 1 16: if eq mod i 4 1: tr.add i</pre>
+
+<p>By the end of the <a href="quickstart.html">quickstart</a> you will have written this script, checked it, seen
+what it does, and run it on the machine. By the end of the studies you will be able to read any script in the
+<a href="https://github.com/nordseele/otype/blob/main/docs/cookbook.md">cookbook</a> and write your own.</p>
+
+<h2>What you need</h2>
+
+<ul>
+  <li><b>A text editor.</b> Any will do. <a href="https://github.com/nordseele/otype/tree/main/editors/vscode">The
+    VS Code extension</a> checks your script as you type, with the same rules as the unit.</li>
+  <li><b>Python 3</b> and a copy of the <a href="https://github.com/nordseele/otype">OType repository</a>, to check
+    scripts and run them on the computer. You can follow every study this way, without an Octatrack.</li>
+  <li><b>An Octatrack running a firmware that integrates OType</b>, such as
+    <a href="https://github.com/nordseele/ot1">OT1</a>, to hear the result. OType is developed on the MKI, OS 1.40C.</li>
+</ul>
+
+<h2>The studies</h2>
+
+<ol class="toc-list">
+  <li><a href="quickstart.html">Quickstart</a> — a first script, from the editor to the machine</li>
+  <li><a href="expressions.html">Numbers and expressions</a> — math, comparisons and logic in prefix notation</li>
+  <li><a href="decisions-and-loops.html">Decisions and loops</a> — <code>if</code>, <code>l</code>, <code>prob</code>, <code>every</code> and the other modifiers</li>
+  <li><a href="variables.html">Variables and memory</a> — what a script remembers, and for how long</li>
+  <li><a href="context.html">Tracks and steps</a> — the context: what a line acts on</li>
+  <li><a href="functions.html">Functions</a> — your own words, with arguments and return values</li>
+  <li><a href="the-player.html">Asking the player</a> — parameters, confirmation and messages</li>
+  <li><a href="randomness.html">Chance you can repeat</a> — random values, lists and seeds</li>
+  <li><a href="live-scripts.html">Live scripts</a> — scripts that run with the sequencer, MIDI, links between scripts</li>
+  <li><a href="errors-and-limits.html">When something is wrong</a> — errors, and why every run ends</li>
+  <li><a href="scope.html">Appendix: scope at a glance</a> — who sees what, in one table</li>
+</ol>
+
+<p>When you know what you want to do and need the exact word, go to the
+<a href="../index.html">command reference</a>: every operation, its arguments and an example.</p>

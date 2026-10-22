@@ -1,0 +1,95 @@
+<h1>Live scripts</h1>
+
+<p>Every function so far ran once, when you chose it, and then finished. A <b>live script</b> keeps running with
+the sequencer: it wakes on the clock, on a MIDI note, a controller or a trig, does its work, and sleeps until the
+next event. This study builds a bass filter that moves on its own, then pads you play from a MIDI controller.</p>
+
+<h2>Waking on the clock: <code>in clock</code></h2>
+
+<p><code>in clock n:</code> runs its block every <code>n</code> clock ticks. A quarter note is 96 ticks, so
+<code>in clock 24</code> is every sixteenth and <code>in clock 96</code> every beat.</p>
+
+<pre class="oty" data-caption="A filter that wanders on each beat">def wobble
+  var cut 64
+  in clock 96:
+    cut lim add cut sub rnd 21 10 20 120
+    trk 1:
+      par.set fx1 2 cut</pre>
+
+<p>Here <code>var</code> matters: a live script keeps its named variables from one wake to the next, so
+<code>cut</code> walks up and down instead of starting over. <code>par.set fx1 2 cut</code> writes the second
+parameter of FX1 on track 1, the cutoff when FX1 is the filter. How a live script is started and stopped depends on
+your firmware.</p>
+
+<h2>Starting on the bar: <code>launch</code></h2>
+
+<p><code>launch n</code> makes the first wake wait for the next multiple of <code>n</code> ticks:
+<code>launch 384</code> starts the script on the next bar in 4/4.</p>
+
+<h2>Waking on MIDI and on trigs</h2>
+
+<table>
+  <thead><tr><th>block</th><th>wakes on</th><th>reads</th></tr></thead>
+  <tbody>
+    <tr><td><code>in note [ch]:</code></td><td>a note-on, from any channel or channel ch</td><td><code>note.num</code> <code>note.vel</code> <code>note.ch</code></td></tr>
+    <tr><td><code>in cc ch n:</code></td><td>controller n on channel ch</td><td><code>cc.val</code> <code>cc.num</code> <code>cc.ch</code></td></tr>
+    <tr><td><code>in trig t:</code></td><td>each trig of track t that plays</td><td><code>trig.step</code></td></tr>
+    <tr><td><code>in trig t all:</code></td><td>each trig placed on track t, played or not</td><td><code>trig.step</code> <code>trig.hit</code></td></tr>
+  </tbody>
+</table>
+
+<pre class="oty" data-caption="Notes 60 to 67 play tracks 1 to 8, at their velocity">def pad_play
+  in note 1:
+    a sub note.num 59
+    if and gt a 0 lt a 9:
+      trk a:
+        trk.level note.vel
+        play a</pre>
+
+<p>The other direction works too: <code>send.note</code>, <code>send.cc</code>, <code>send.prog</code> and
+<code>send.nrpn</code> send MIDI out, from a live script or from a menu function.</p>
+
+<h2>Scripts that talk to each other</h2>
+
+<p>Live scripts can be wired like modules in a patch. <code>gate n</code> sends a gate on one of the script's four
+outputs; another script that declares <code>in gate NAME n:</code> wakes on it, in the same tick.
+<code>out n v</code> publishes a number on an output, and <code>cv NAME n</code> reads it from another script.</p>
+
+<pre class="oty" data-caption="A random gate and value, followed by a second script">def acid
+  in clock 24:
+    prob 50: gate 1
+    out 1 rnd 128
+
+def follow
+  in gate acid 1:
+    trk 2:
+      par.set fx1 2 cv acid 1
+    play 2</pre>
+
+<h2>What a live script may not do</h2>
+
+<p>A live script runs while the music plays, with no one to answer a question: it cannot use an operation that
+asks for confirmation, such as <code>pat.copy</code>. The checker refuses it, in the script and in the bricks it
+calls.</p>
+
+<div class="recap">
+<h2>What you learned</h2>
+<dl>
+  <dt><code>in clock n:</code></dt><dd>wake every n ticks, 96 per quarter note</dd>
+  <dt><code>var</code></dt><dd>kept from one wake to the next</dd>
+  <dt><code>launch n</code></dt><dd>wait for the next multiple of n ticks to start</dd>
+  <dt><code>in note</code> · <code>in cc</code> · <code>in trig</code></dt><dd>wake on MIDI or on the sequencer</dd>
+  <dt><code>send.note</code> · <code>send.cc</code> …</dt><dd>MIDI out</dd>
+  <dt><code>gate</code> · <code>in gate</code> · <code>out</code> · <code>cv</code></dt><dd>links between scripts</dd>
+</dl>
+</div>
+
+<div class="try">
+<h2>Try it</h2>
+<ul>
+  <li>Make <code>wobble</code> faster, on every sixteenth, with smaller steps.</li>
+  <li>Change <code>pad_play</code> so that notes 36 to 43 play the tracks.</li>
+  <li>Read the drum and bass script <a href="https://github.com/nordseele/otype/blob/main/modules/otype/examples/DNB.OTY"><code>DNB.OTY</code></a>:
+    you can now read it from top to bottom.</li>
+</ul>
+</div>

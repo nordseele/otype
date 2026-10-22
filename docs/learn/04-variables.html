@@ -1,0 +1,116 @@
+<h1>Variables and memory</h1>
+
+<p>A variable holds a number. What sets OType's variables apart is <b>how long</b> they keep it: for one run, from
+one press to the next, or for the life of a live script. This study builds a rhythm that turns a little further on
+each press, and a function that alternates between two patterns.</p>
+
+<h2>Giving a variable a value</h2>
+
+<p>A line that starts with a variable gives it a value; anywhere else, the variable is read.</p>
+
+<pre class="oty" data-caption="Assign, then read" data-run="count_up">def count_up
+  menu "LEARN" >> "COUNT UP"
+  a 5
+  a add a 1             # read a, add 1, store the result back in a
+  b mul a 2
+  msg "A" a "B" b</pre>
+
+<p>There is nothing to declare for the one-letter variables: they are always there, and start at 0.</p>
+
+<h2>Four kinds of letters</h2>
+
+<table>
+  <thead><tr><th>names</th><th>kind</th><th>keeps its value</th></tr></thead>
+  <tbody>
+    <tr><td><code>a b c d</code></td><td>local</td><td>for one run of one function. Every call has its own: a function you call cannot change yours. 0 at the start of each run.</td></tr>
+    <tr><td><code>x y z t</code></td><td>global</td><td>from one press to the next, shared by every function in every file. 0 when the machine starts.</td></tr>
+    <tr><td><code>i j</code></td><td>counters</td><td>set by the loops (<code>i</code> the inner loop, <code>j</code> the one around it); read-only</td></tr>
+  </tbody>
+</table>
+
+<p>Use <code>a b c d</code> for working values, and keep <code>x y z t</code> for what really has to survive the
+press, since every function can change them.</p>
+
+<h2>One press A, the next press B</h2>
+
+<p><code>not x</code> is 1 when <code>x</code> is 0, and 0 otherwise. Storing it back in <code>x</code> on each
+press makes <code>x</code> alternate: 1, 0, 1, 0…</p>
+
+<pre class="oty" data-caption="Two rhythms, one press each" data-run="ab_rhythm">def ab_rhythm
+  menu "LEARN" >> "A/B"
+  x not x
+  tr.clr
+  if x: l 1 16: if er 5 16 i: tr.add i
+  else: l 1 16: if er 3 8 i: tr.add i</pre>
+
+<h2>Variables with a name: <code>var</code></h2>
+
+<p>When a function needs to remember something of its own, give it a named variable. <code>var name start</code>
+goes at the top of the function, before the first statement; the variable starts at <code>start</code> when the
+scripts are loaded and keeps its value from one press to the next. Unlike <code>x y z t</code>, it belongs to its
+function alone. A function may have up to 16 of them.</p>
+
+<pre class="oty" data-caption="A rhythm that turns one step further on each press" data-run="rotate">def rotate
+  menu "LEARN" >> "ROTATE"
+  var shift 0
+  shift wrap add shift 1 0 15
+  tr.clr
+  l 1 16: if er.r 5 16 shift i: tr.add i
+  msg "SHIFT" shift</pre>
+
+<p><code>er.r</code> is <code>er</code> with one more value, a rotation. <code>wrap … 0 15</code> brings 16 back
+to 0, so the rhythm comes round after sixteen presses.</p>
+
+<h2>Names you can read but not change</h2>
+
+<p>A <code>param</code>, a <code>const</code> and the arguments of a function are read like variables, but cannot
+be assigned: <code>gap 3</code> on a <code>param gap</code> is an error. You will meet <code>const</code> and
+arguments in <a href="functions.html">functions</a>.</p>
+
+<h2>Values that move by themselves</h2>
+
+<p>Three words read like variables but change each time they are read. Each function has its own, kept between
+presses.</p>
+
+<table>
+  <thead><tr><th>read</th><th>gives</th><th>set with</th></tr></thead>
+  <tbody>
+    <tr><td><code>flip</code></td><td>0, 1, 0, 1… one more at each read</td><td><code>flip 0</code></td></tr>
+    <tr><td><code>o</code></td><td>a counter: 0, 1, 2… up to <code>o.max</code> (63), then round again</td><td><code>o 0</code> · <code>o.min</code> · <code>o.max</code> · <code>o.inc</code> · <code>o.wrap</code></td></tr>
+    <tr><td><code>drunk</code></td><td>a random walk: one step down, none or one step up at each read</td><td><code>drunk 64</code> · <code>drunk.min</code> · <code>drunk.max</code> · <code>drunk.wrap</code></td></tr>
+  </tbody>
+</table>
+
+<pre class="oty" data-caption="A volume that wanders from step to step" data-run="wander" data-runargs="-v --seed 2">def wander
+  menu "LEARN" >> "WANDER"
+  drunk.max 15
+  drunk 12
+  tr.clr
+  l 1 16:
+    tr.add i
+    pl.set i amp.vol add 7 mul drunk 8</pre>
+
+<p><code>drunk</code> walks between 0 and 15 here; <code>add 7 mul drunk 8</code> turns each of its steps into
+a clear change of volume, from 7 to 127.</p>
+
+<div class="recap">
+<h2>What you learned</h2>
+<dl>
+  <dt><code>a 5</code> · <code>a add a 1</code></dt><dd>a variable first on a line gets a value</dd>
+  <dt><code>a b c d</code></dt><dd>local to one run of one function</dd>
+  <dt><code>x y z t</code></dt><dd>global, kept between presses</dd>
+  <dt><code>i j</code></dt><dd>loop counters, read-only</dd>
+  <dt><code>var name start</code></dt><dd>a named variable of one function, kept between presses</dd>
+  <dt><code>flip</code> · <code>o</code> · <code>drunk</code></dt><dd>values that move at each read</dd>
+  <dt><code>er.r k n r s</code></dt><dd>a Euclidean rhythm, rotated by r</dd>
+</dl>
+</div>
+
+<div class="try">
+<h2>Try it</h2>
+<ul>
+  <li>Make <code>ab_rhythm</code> cycle through three rhythms, with <code>x wrap add x 1 0 2</code>.</li>
+  <li>Rewrite <code>rotate</code> with <code>o</code> instead of <code>var</code>.</li>
+  <li>Keep <code>wander</code> loud: raise <code>drunk.min</code> to 8.</li>
+</ul>
+</div>

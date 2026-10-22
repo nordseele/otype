@@ -1,0 +1,140 @@
+<h1>Numbers and expressions</h1>
+
+<p>In the quickstart, one line did all the work: <code>if eq mod i 4 1: tr.add i</code>. This study teaches you
+to read and write that kind of line: arithmetic, comparisons and logic. On the way, you build off-beat hats and
+accents from nothing but numbers.</p>
+
+<h2>Prefix notation</h2>
+
+<p>OType writes the operation first, then its values. There are no parentheses and no precedence to remember:
+each operation knows how many values it takes, and takes the ones that follow it.</p>
+
+<pre class="plain">add 1 mul 2 3
+
+add  needs two values:
+  1          the first
+  mul 2 3    the second, itself an operation: 2 × 3 = 6
+= 1 + 6 = 7</pre>
+
+<p>To see it for yourself, store the result in a variable and show it with <code>msg</code>, which writes a short
+text in the box at the end of the run (the simulator prints it too):</p>
+
+<pre class="oty" data-caption="Seeing a value" data-run="math">def math
+  menu "LEARN" >> "MATH"
+  a add 1 mul 2 3
+  msg "A IS" a</pre>
+
+<p><code>a add 1 mul 2 3</code> is an <b>assignment</b>: a variable name, then a value. Variables have
+<a href="variables.html">their own study</a>; for now, <code>a</code> is a box that holds a number.</p>
+
+<p>Read a long expression the same way: find the first operation, give it its values one by one, and when a value
+is itself an operation, complete that one first. <code>eq mod i 4 1</code> is <code>eq</code> of two values:
+<code>mod i 4</code> and <code>1</code>. So it asks “is the remainder of <code>i</code> by 4 equal to 1?”.</p>
+
+<h2>Numbers</h2>
+
+<p>Every value is a whole number from −32768 to 32767. There are no fractions: a division drops them, so
+<code>div 7 2</code> is 3 and <code>div -7 2</code> is −3. A result beyond the range stops at its edge
+(<code>mul 300 300</code> is 32767) instead of wrapping around, and the arithmetic never fails: dividing by zero
+gives 0.</p>
+
+<table>
+  <thead><tr><th>write</th><th>or</th><th>means</th></tr></thead>
+  <tbody>
+    <tr><td><code>add x y</code></td><td><code>+ x y</code></td><td>x + y</td></tr>
+    <tr><td><code>sub x y</code></td><td><code>- x y</code></td><td>x − y</td></tr>
+    <tr><td><code>mul x y</code></td><td><code>* x y</code></td><td>x × y</td></tr>
+    <tr><td><code>div x y</code></td><td><code>/ x y</code></td><td>x ÷ y, without the fraction (0 if y is 0)</td></tr>
+    <tr><td><code>mod x y</code></td><td><code>% x y</code></td><td>the remainder, never negative: <code>mod -1 4</code> is 3</td></tr>
+    <tr><td><code>min x y</code> · <code>max x y</code></td><td></td><td>the smaller · the larger</td></tr>
+    <tr><td><code>abs x</code> · <code>neg x</code></td><td></td><td>without its sign · with the opposite sign</td></tr>
+    <tr><td><code>lim x lo hi</code></td><td></td><td>x, kept between lo and hi</td></tr>
+    <tr><td><code>wrap x lo hi</code></td><td></td><td>x, wrapped around into lo … hi</td></tr>
+  </tbody>
+</table>
+
+<p>The symbols are only another spelling: <code>+ 1 * 2 3</code> is the same line as <code>add 1 mul 2 3</code>.
+A minus sign glued to a number, <code>-3</code>, is a negative number; spaced, <code>- 3 1</code>, it is a
+subtraction.</p>
+
+<h2>True and false</h2>
+
+<p>OType has no separate true and false: <b>0 is false, any other number is true</b>. A comparison gives 1 when
+it holds and 0 when it does not.</p>
+
+<table>
+  <thead><tr><th>write</th><th>or</th><th>is 1 when</th></tr></thead>
+  <tbody>
+    <tr><td><code>eq x y</code></td><td><code>== x y</code></td><td>x equals y</td></tr>
+    <tr><td><code>ne x y</code></td><td><code>!= x y</code></td><td>x differs from y</td></tr>
+    <tr><td><code>lt x y</code> · <code>gt x y</code></td><td><code>&lt;</code> · <code>&gt;</code></td><td>x is less · greater than y</td></tr>
+    <tr><td><code>le x y</code> · <code>ge x y</code></td><td><code>&lt;=</code> · <code>&gt;=</code></td><td>x is at most · at least y</td></tr>
+    <tr><td><code>ez x</code> · <code>nz x</code></td><td></td><td>x is zero · x is not zero</td></tr>
+  </tbody>
+</table>
+
+<p>Comparisons combine with logic: <code>and x y</code>, <code>or x y</code>, <code>xor x y</code> (one of the two,
+not both) and <code>not x</code>. Both sides of <code>and</code> and <code>or</code> are always computed.</p>
+
+<p>Off-beat hats are the odd steps that are not on a beat: an odd step, <b>and</b> not a beat.</p>
+
+<pre class="oty" data-caption="Off-beat hats from two conditions" data-run="offbeats">def offbeats
+  menu "LEARN" >> "OFFBEATS"
+  tr.clr
+  l 1 16: if and eq mod i 2 1 ne mod i 4 1: tr.add i</pre>
+
+<p>Read the condition from the left: <code>and</code> takes two values, <code>eq mod i 2 1</code> (i is odd) and
+<code>ne mod i 4 1</code> (i is not 1, 5, 9 or 13). Steps 3, 7, 11 and 15 remain.</p>
+
+<h2>Choosing a value</h2>
+
+<p><code>? c a b</code> is worth <code>a</code> when <code>c</code> is true, otherwise <code>b</code>. Only the
+chosen side is computed. Here it gives each step a volume: loud on the beats, soft in between.</p>
+
+<pre class="oty" data-caption="Accents: a volume lock chosen by ?" data-run="accents" data-runargs="-v">def accents
+  menu "LEARN" >> "ACCENTS"
+  tr.clr
+  l 1 16:
+    tr.add i
+    pl.set i amp.vol ? eq mod i 4 1 127 60</pre>
+
+<p>Two new things here. The line <code>l 1 16:</code> ends with its <code>:</code>, so the loop repeats the
+<b>indented lines below it</b>, a block, instead of the rest of the line. And <code>pl.set s param value</code>
+writes a parameter lock on a step: <code>amp.vol</code> is the volume of the AMP page.</p>
+
+<h2>Rhythms in one word</h2>
+
+<p>Some operations are whole rhythms. <code>er k n s</code> is 1 when step <code>s</code> plays in a Euclidean
+rhythm of <code>k</code> hits spread over <code>n</code> steps:</p>
+
+<pre class="oty" data-caption="Five hits over sixteen steps" data-run="five_of_16">def five_of_16
+  menu "LEARN" >> "EUCLID"
+  tr.clr
+  l 1 16: if er 5 16 i: tr.add i</pre>
+
+<p><code>dr.v c s</code> gives a velocity from one of eight ready-made curves, step by step; you will see it in
+the <a href="context.html">tracks and steps</a> study.</p>
+
+<div class="recap">
+<h2>What you learned</h2>
+<dl>
+  <dt>prefix notation</dt><dd>the operation first, then exactly as many values as it takes</dd>
+  <dt><code>add sub mul div mod</code></dt><dd>arithmetic on whole numbers, also <code>+ - * / %</code></dd>
+  <dt><code>min max abs neg lim wrap</code></dt><dd>bounds and signs</dd>
+  <dt><code>eq ne lt gt le ge ez nz</code></dt><dd>comparisons: 1 or 0</dd>
+  <dt><code>and or xor not</code></dt><dd>logic; 0 is false, anything else true</dd>
+  <dt><code>? c a b</code></dt><dd>a if c, else b</dd>
+  <dt><code>er k n s</code></dt><dd>a Euclidean rhythm, step by step</dd>
+  <dt><code>pl.set s p v</code></dt><dd>a parameter lock on step s</dd>
+  <dt><code>msg …</code></dt><dd>a text at the end of the run</dd>
+</dl>
+</div>
+
+<div class="try">
+<h2>Try it</h2>
+<ul>
+  <li>Compute <code>sub 10 mul 2 add 1 2</code> in your head, then check it with <code>msg</code>.</li>
+  <li>Write the snare of a backbeat: a trig on steps 5 and 13 only, in one <code>if</code>.</li>
+  <li>Make the accents grow through the bar: a volume of <code>add 40 mul i 5</code>.</li>
+</ul>
+</div>

@@ -157,6 +157,14 @@ def highlight(src):
     return "\n".join(out)
 
 
+INLINE = re.compile(r"<code>([^<]+)</code>")
+
+
+def highlight_inline(page):
+    """Colour every inline <code> that holds plain text (blocks are highlighted on their own)."""
+    return INLINE.sub(lambda m: "<code>" + highlight(html.unescape(m.group(1))) + "</code>", page)
+
+
 def tutorial_blocks():
     prog = otype.check_files([TUTORIAL])
     if any(" error: " in str(d) for d in prog.sorted_diags()):
@@ -195,6 +203,21 @@ def entry_html(o):
     return (f'<div class="op" data-s="{search}"><div class="sig"><code>{sig}</code>'
             f'{f"<span class=alias>{alias}</span>" if alias else ""}</div>'
             f'<div class="doc">{html.escape(lower_names(o["doc"]))}{" " + " ".join(chips) if chips else ""}</div></div>')
+
+
+SITE = (("learn", "learn/"), ("reference", "./"), ("roadmap", "roadmap.html"),
+        ("cookbook", "https://github.com/nordseele/otype/blob/main/docs/cookbook.md"),
+        ("github", "https://github.com/nordseele/otype"))
+
+
+def site_nav(current, up=""):
+    """The site's top navigation; `up` is the path back to the site root ("../" from learn/)."""
+    links = []
+    for name, href in SITE:
+        url = href if href.startswith("http") else up + href
+        cur = ' aria-current="page"' if name == current else ""
+        links.append(f'<a href="{url}"{cur}>{name}</a>')
+    return '<nav class="site" aria-label="Site">' + "".join(links) + "</nav>"
 
 
 def build(fragment):
@@ -251,8 +274,9 @@ def build(fragment):
         overview.append(f'<tr><th scope="row"><a href="#{sid}">{html.escape(title)}</a></th>'
                         f'<td>{len(by_cat[cat])}</td><td>{html.escape(CATEGORY_SUMMARIES[cat])}</td></tr>')
 
-    body = PAGE.format(css=open(CSS_FILE, encoding="utf-8").read(), js=JS, wordmark=wordmark_svg(WORDMARK), steps=STEPS, n_ops=n_ops, version=VERSION, example_line=highlight(EXAMPLE_LINE), letters=letters, examples=examples,
+    body = PAGE.format(css=open(CSS_FILE, encoding="utf-8").read(), js=JS, wordmark=wordmark_svg(WORDMARK), steps=STEPS, n_ops=n_ops, version=VERSION, example_line=highlight(EXAMPLE_LINE), letters=letters, examples=examples, site_nav=site_nav("reference"),
                        sections="".join(sections), nav=nav, overview="".join(overview), n_cats=len(overview))
+    body = highlight_inline(body)
     if fragment:
         return body
     head, body = body.split('<div class="wrap">', 1)          # title, fonts and style go in <head>
@@ -262,7 +286,7 @@ def build(fragment):
             '</head>\n<body>\n<div class="wrap">' + body + '\n</body>\n</html>\n')
 
 
-OG_META = '<meta name="description" content="Every command of OType, simple yet powerful scripting for the Octatrack: what it does, its arguments, examples.">\n<meta name="theme-color" content="#1a1a1a">\n<meta property="og:type" content="website">\n<meta property="og:site_name" content="otype">\n<meta property="og:title" content="OType Command Reference">\n<meta property="og:description" content="Every command of OType, simple yet powerful scripting for the Octatrack: what it does, its arguments, examples.">\n<meta property="og:url" content="https://nordseele.github.io/otype-docs/">\n<meta property="og:image" content="https://nordseele.github.io/otype-docs/og.png">\n<meta property="og:image:width" content="1200">\n<meta property="og:image:height" content="630">\n<meta property="og:image:alt" content="otype: simple yet powerful scripting for the Octatrack">\n<meta name="twitter:card" content="summary_large_image">\n'   # link preview (tools/og_image.py -> otype-docs/og.png)
+OG_META = '<meta name="description" content="Every command of OType, scripting for the Octatrack: what it does, its arguments, examples.">\n<meta name="theme-color" content="#1a1a1a">\n<meta property="og:type" content="website">\n<meta property="og:site_name" content="otype">\n<meta property="og:title" content="OType Command Reference">\n<meta property="og:description" content="Every command of OType, scripting for the Octatrack: what it does, its arguments, examples.">\n<meta property="og:url" content="https://nordseele.github.io/otype-docs/">\n<meta property="og:image" content="https://nordseele.github.io/otype-docs/og.png">\n<meta property="og:image:width" content="1200">\n<meta property="og:image:height" content="630">\n<meta property="og:image:alt" content="otype: scripting for the Octatrack">\n<meta name="twitter:card" content="summary_large_image">\n'   # link preview (tools/og_image.py -> otype-docs/og.png)
 
 CSS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cheatsheet.css")
 
@@ -302,7 +326,7 @@ def wordmark_svg(text):
 STEPS = "".join('<i class="%s"></i>' % ("f on" if i == 0 else "f" if i % 4 == 0 else "") .strip() for i in range(16))
 
 
-JS = r"""
+SHARED_JS = r"""
 (function () {
   var root = document.documentElement, btn = document.getElementById('theme');
   var mq = window.matchMedia('(prefers-color-scheme: dark)');
@@ -322,6 +346,12 @@ JS = r"""
   if (steps.length && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     setInterval(function () { steps[at].classList.remove('on'); at = (at + 1) % steps.length; steps[at].classList.add('on'); }, tempo);
   }
+})();
+"""
+
+JS = SHARED_JS + r"""
+(function () {
+  var root = document.documentElement;
   var links = Array.prototype.slice.call(document.querySelectorAll('nav.jump a'));
   function here() { links.forEach(function (a) { if (a.getAttribute('href') === location.hash) a.setAttribute('aria-current', 'true'); else a.removeAttribute('aria-current'); }); }
   window.addEventListener('hashchange', here); here();
@@ -354,13 +384,14 @@ JS = r"""
 PAGE = """<title>OType Command Reference</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,300;0,400;0,600;1,400&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500&display=swap">
 <style>{css}</style>
 <div class="wrap">
 <div class="bar"><span class="cell first">OTYPE</span><span class="cell">{version}</span><span class="cell">{n_ops} ops</span><span class="cell end">octatrack</span><button id="theme" class="cell" type="button">dark</button></div>
 <header class="top">
   <h1 aria-label="otype">{wordmark}</h1>
-  <p class="tag">simple yet powerful scripting for the octatrack · <a href="roadmap.html">roadmap</a> · <a href="https://github.com/nordseele/otype">github</a></p>
+  <p class="tag">scripting for the octatrack</p>
+  {site_nav}
   <div class="steps" aria-hidden="true">{steps}</div>
 </header>
 <div class="overview">
@@ -390,7 +421,7 @@ PAGE = """<title>OType Command Reference</title>
 <p id="none" class="empty" hidden>No command matches this search.</p>
 <main class="sheet">{sections}</main>
 <footer>
-  <p>otype — simple yet powerful scripting for the octatrack</p>
+  <p>otype — scripting for the octatrack</p>
   <p><span class="todo" aria-hidden="true">\u25cc</span> see the operation's status tooltip · {version} runs on the Octatrack MKI; the audio operators are experimental · generated from the operation registry; the examples pass the OType checker</p>
   <p>syntax directly inspired by <a href="https://monome.org/docs/teletype/">monome teletype</a> · not affiliated with, endorsed or supported by elektron or monome</p>
   <p>elektron and octatrack are trademarks of elektron music machines; monome and teletype belong to monome. the names are used only to say what this works with.</p>

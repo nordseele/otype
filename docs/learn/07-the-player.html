@@ -1,0 +1,95 @@
+<h1>Asking the player</h1>
+
+<p>A script runs on a machine you play. This study is about the moment between choosing a function and running
+it: the settings the player edits, the question asked before a change, and the message shown at the end. You build
+a hat generator with three settings.</p>
+
+<h2>Where the function appears: <code>menu</code></h2>
+
+<p><code>menu "CATEGORY" >> "NAME"</code> places the function in the script menu. A function may have several
+<code>menu</code> lines to appear in several places. The names are short, as on the Octatrack's screen: the
+checker refuses those that would not fit.</p>
+
+<h2>Settings: <code>param</code></h2>
+
+<p>Each <code>param</code> is a setting shown before the run, read in the script like a number that cannot be
+changed. A function has up to eight. Four kinds exist:</p>
+
+<table>
+  <thead><tr><th>write</th><th>the player sees</th><th>the script reads</th></tr></thead>
+  <tbody>
+    <tr><td><code>param hits 7 1 16</code></td><td>a number from 1 to 16, 7 at first</td><td>that number</td></tr>
+    <tr><td><code>param accent bool 1</code></td><td>YES or NO</td><td>1 or 0</td></tr>
+    <tr><td><code>param curve option 1 "FLAT" "BEATS"</code></td><td>one of the labels, the second at first</td><td>its position, from 0</td></tr>
+    <tr><td><code>param src folder "AUDIO"</code></td><td>a folder on the card, picked in a browser</td><td>a folder, for <code>dir src</code></td></tr>
+  </tbody>
+</table>
+
+<pre class="oty" data-caption="A hat generator with three settings" data-run="hat_maker" data-runargs="-v">def hat_maker
+  menu "LEARN" >> "HATS"
+  param hits 7 1 16
+  param accent bool 1
+  param curve option 1 "FLAT" "BEATS" "OFFBEATS"
+  confirm "REPLACE THE HATS?"
+  tr.clr
+  l 1 16: if er hits 16 i: tr.add i
+  if accent:
+    steps has.trig:
+      each: pl.set i amp.vol dr.v curve i
+  msg hits "HITS"</pre>
+
+<p>The positions of the <code>option</code> labels, 0, 1 and 2, are also the numbers of the <code>dr.v</code>
+curves flat, accents on the beats and accents off the beats: the setting goes straight into the curve. On the
+computer, <code>run … --param hits=11</code> tries another value.</p>
+
+<p>A <code>folder</code> setting is not a number: only <code>dir</code> reads it, to list the files of the
+folder the player picked. The audio recipes of the
+<a href="https://github.com/nordseele/otype/blob/main/docs/cookbook.md">cookbook</a> use it to fill sample slots
+or build chains.</p>
+
+<h2>Asking first: <code>confirm</code></h2>
+
+<p>Some operations change the project in a way you might regret: <code>tr.clr</code>, saving a file, copying a
+pattern. The <a href="../index.html">command reference</a> marks them <i>destructive</i>. A function that uses one,
+directly or through a brick, always asks YES or NO before it runs. <code>confirm</code> asks even when nothing is
+destructive, and <code>confirm "TEXT"</code> chooses the question.</p>
+
+<h2>The last word: <code>msg</code></h2>
+
+<p>At the end of a run, a box shows <code>DONE</code>. <code>msg</code> replaces that text: up to eight items,
+texts and numbers, joined by spaces. Each <code>msg</code> replaces the previous one, so the last one wins. The
+box is small: the checker counts the longest text a <code>msg</code> could make (a number counts six characters)
+and refuses more than 29.</p>
+
+<h2>Two more declarations</h2>
+
+<ul>
+  <li><code>page "LABEL"</code> lists the function on a page of encoders, when your firmware has one: its first
+    six <code>param</code>s are then on the encoders A to F.</li>
+  <li><code>input sample</code> says that the function works on a recorded take, and makes it appear where a take
+    is available.</li>
+</ul>
+
+<p>Like <code>param</code> and <code>var</code>, these declarations go at the top of the function, before the
+first statement.</p>
+
+<div class="recap">
+<h2>What you learned</h2>
+<dl>
+  <dt><code>menu</code></dt><dd>where the function appears; several allowed</dd>
+  <dt><code>param</code></dt><dd>a number, <code>bool</code>, <code>option</code> or <code>folder</code> setting</dd>
+  <dt><code>confirm ["TEXT"]</code></dt><dd>ask YES or NO; implied by destructive operations</dd>
+  <dt><code>msg …</code></dt><dd>the text of the end box, 29 characters at most</dd>
+  <dt><code>page</code> · <code>input sample</code></dt><dd>an encoder page · a function for a recorded take</dd>
+</dl>
+</div>
+
+<div class="try">
+<h2>Try it</h2>
+<ul>
+  <li>Add a <code>param</code> that chooses the track of <code>hat_maker</code> (and use it with <code>trk</code>).</li>
+  <li>Show the curve's label at the end instead of the number of hits: <code>if</code>, then three
+    <code>msg</code>.</li>
+  <li>Run <code>hat_maker</code> on the computer with <code>--param accent=0</code>.</li>
+</ul>
+</div>
