@@ -2,7 +2,7 @@
   <img src="https://nordseele.github.io/otype-docs/og.png" alt="otype: scripting for the Octatrack" width="600">
 </p>
 
-<h2 align="center"><a href="https://nordseele.github.io/otype-docs/">→ Read the documentation</a></h2>
+<h2 align="left"><a href="https://nordseele.github.io/otype-docs/">Read the documentation</a></h2>
 
 <p align="center">
   <a href="https://nordseele.github.io/otype-docs/learn/"><b>Learn</b></a> ·
